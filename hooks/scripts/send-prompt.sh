@@ -78,25 +78,47 @@ significant=$(echo "$response" | jq -r '.correction.significant // false')
 
 # Handle corrections
 if [ "$has_correction" = "true" ]; then
+  # Check if this is a translation (explanation contains "Translated from")
+  is_translation=false
+  if echo "$explanation" | grep -qi "Translated from"; then
+    is_translation=true
+  fi
+
   if [ "$mode" = "block" ] && [ "$significant" = "true" ]; then
     # Block mode with significant correction: block the prompt
-    jq -n \
-      --arg corrected "$corrected_text" \
-      --arg explanation "$explanation" \
-      '{
-        "decision": "block",
-        "reason": ("📝 Language Correction\n\n" + $explanation + "\n\nImproved prompt: " + $corrected)
-      }'
+    if [ "$is_translation" = "true" ]; then
+      # For translations: just show title and translated text
+      jq -n \
+        --arg corrected "$corrected_text" \
+        '{
+          "decision": "block",
+          "reason": ("🌐 Lingo Translation\n\n" + $corrected)
+        }'
+    else
+      jq -n \
+        --arg corrected "$corrected_text" \
+        --arg explanation "$explanation" \
+        '{
+          "decision": "block",
+          "reason": ("📝 Lingo Correction\n\n" + $explanation + "\n\nImproved prompt: " + $corrected)
+        }'
+    fi
     exit 0
   else
     # Non-block mode or minor correction: show but continue
-    echo "📝 Language Correction" >&2
-    echo "$explanation" >&2
-    echo "Improved prompt: $corrected_text" >&2
+    if [ "$is_translation" = "true" ]; then
+      # For translations: just show title and translated text
+      echo "🌐 Lingo Translation" >&2
+      echo "$corrected_text" >&2
+    else
+      echo "📝 Lingo Correction" >&2
+      echo "$explanation" >&2
+      echo "Improved prompt: $corrected_text" >&2
+    fi
   fi
 elif [ -n "$alternative" ] && [ "$alternative" != "null" ]; then
   # Show alternative (both non-block and block modes)
-  echo "💬 Alternative" >&2
+  echo "💬 Lingo Suggestion" >&2
   echo "$explanation" >&2
   echo "Alternative: $alternative" >&2
 fi
