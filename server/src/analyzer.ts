@@ -84,13 +84,13 @@ OTHERWISE, analyze the ${targetLang} text:
    - Ignore minor issues like missing capitalization or missing commas/periods (acceptable in casual coding communication)
    - Set "significant": true for grammar errors, wrong word usage, or unnatural expressions that affect meaning
    - Set "significant": false for minor typos or small mistakes that don't affect understanding
-   - Return: {"hasCorrection": true, "correction": "<corrected version>", "alternative": null, "significant": <true or false>, "explanation": "<bullet-listed explanation using '- ' prefix for each point>"}
+   - Return: {"hasCorrection": true, "correction": "<corrected version>", "alternative": null, "significant": <true or false>, "explanation": "<bullet-listed explanation using '- **title:** description' format, where title is 1-3 words like 'article', 'tense', 'word choice', 'unnatural'>"}
 
 3. If the text is correct and natural, suggest an alternative way to express the same idea:
    - Set "significant": true ONLY if the alternative is significantly more natural, idiomatic, or better than the original (worth learning)
    - Set "significant": false if the alternative is just a minor variation with similar quality
    - Do NOT suggest alternatives that match or are very similar to any of the recent prompts shown above
-   - Return: {"hasCorrection": false, "correction": null, "alternative": "<alternative expression>", "significant": <true or false>, "explanation": "<bullet-listed notes on nuance differences using '- ' prefix for each point>"}
+   - Return: {"hasCorrection": false, "correction": null, "alternative": "<alternative expression>", "significant": <true or false>, "explanation": "<bullet-listed notes on nuance differences using '- **title:** description' format, where title is 1-3 words like 'tone', 'nuance', 'formality', 'idiom'>"}
 
 Respond ONLY with valid JSON, no other text.`;
 }
