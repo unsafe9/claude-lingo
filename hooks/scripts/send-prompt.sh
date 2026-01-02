@@ -75,6 +75,17 @@ corrected_text=$(echo "$response" | jq -r '.correction.correctedText // empty')
 explanation=$(echo "$response" | jq -r '.correction.explanation // empty')
 alternative=$(echo "$response" | jq -r '.correction.alternative // empty')
 significant=$(echo "$response" | jq -r '.correction.significant // false')
+auto_copy=$(echo "$response" | jq -r '.autoCopyCorrections // false')
+
+# Copy to clipboard helper (macOS: pbcopy, Linux: xclip)
+copy_to_clipboard() {
+  local text="$1"
+  if command -v pbcopy &> /dev/null; then
+    echo -n "$text" | pbcopy
+  elif command -v xclip &> /dev/null; then
+    echo -n "$text" | xclip -selection clipboard
+  fi
+}
 
 # Handle corrections
 if [ "$has_correction" = "true" ]; then
@@ -82,6 +93,11 @@ if [ "$has_correction" = "true" ]; then
   is_translation=false
   if echo "$explanation" | grep -qi "Translated from"; then
     is_translation=true
+  fi
+
+  # Copy to clipboard if enabled
+  if [ "$auto_copy" = "true" ]; then
+    copy_to_clipboard "$corrected_text"
   fi
 
   if [ "$mode" = "block" ] && [ "$significant" = "true" ]; then

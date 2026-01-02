@@ -17,6 +17,7 @@ const DEFAULT_CONFIG: Config = {
   queueIntervalMs: 30000,
   logLevel: "info",
   tone: "balanced",
+  autoCopyCorrections: false,
 };
 
 // Filter out unknown fields and log them

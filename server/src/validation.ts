@@ -25,6 +25,7 @@ export const ConfigSchema = z.object({
   queueIntervalMs: z.number().int().min(1000).max(300000),
   logLevel: LogLevelSchema,
   tone: ToneSchema,
+  autoCopyCorrections: z.boolean(),
 });
 
 // Known config keys for filtering unknown fields

@@ -36,6 +36,7 @@ interface PromptResponse {
   success: boolean;
   mode?: string;
   skip?: boolean;
+  autoCopyCorrections?: boolean;
   correction?: {
     hasCorrection: boolean;
     correctedText: string | null;
@@ -48,13 +49,14 @@ interface PromptResponse {
 
 import type { AnalysisResult } from "./analyzer.js";
 
-function buildPromptResponse(result: AnalysisResult, mode: string): PromptResponse {
+function buildPromptResponse(result: AnalysisResult, mode: string, autoCopyCorrections: boolean): PromptResponse {
   if (result.skip) {
     return { success: true, mode, skip: true };
   }
   return {
     success: true,
     mode,
+    autoCopyCorrections,
     correction: {
       hasCorrection: result.hasCorrection,
       correctedText: result.correction,
@@ -159,7 +161,7 @@ app.post(
       // Check cache first
       const cachedResult = getCachedResult(sessionId, data.prompt);
       if (cachedResult) {
-        return c.json(buildPromptResponse(cachedResult, config.mode));
+        return c.json(buildPromptResponse(cachedResult, config.mode, config.autoCopyCorrections));
       }
 
       // Check if there's an in-flight request for the same prompt
@@ -167,7 +169,7 @@ app.post(
       if (inFlight) {
         console.debug(`Waiting for in-flight analysis of same prompt`);
         const result = await inFlight;
-        return c.json(buildPromptResponse(result, config.mode));
+        return c.json(buildPromptResponse(result, config.mode, config.autoCopyCorrections));
       }
 
       // Get recent prompts for context
@@ -212,7 +214,7 @@ app.post(
         });
       }
 
-      return c.json(buildPromptResponse(result, config.mode));
+      return c.json(buildPromptResponse(result, config.mode, config.autoCopyCorrections));
     } catch (error) {
       console.error("Analysis error:", error);
       return c.json({ success: false, mode: config.mode, error: "Analysis failed" } as PromptResponse, 500);
