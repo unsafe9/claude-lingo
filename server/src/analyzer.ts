@@ -240,7 +240,7 @@ async function executeAnalysis(
       };
 
       console.debug(
-        `Analysis (${duration}ms): hasCorrection=${result.hasCorrection} significant=${result.significant}`
+        `Analysis (${duration}ms): hasCorrection=${result.hasCorrection} significant=${result.significant} alternative=${result.alternative ? 'yes' : 'no'}`
       );
 
       return result;

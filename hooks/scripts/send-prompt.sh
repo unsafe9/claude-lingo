@@ -105,22 +105,36 @@ if [ "$has_correction" = "true" ]; then
     fi
     exit 0
   else
-    # Non-block mode or minor correction: show but continue
+    # Non-block mode or minor correction: show via systemMessage and continue
     if [ "$is_translation" = "true" ]; then
       # For translations: just show title and translated text
-      echo "🌐 Lingo Translation" >&2
-      echo "$corrected_text" >&2
+      jq -n \
+        --arg corrected "$corrected_text" \
+        '{
+          "continue": true,
+          "systemMessage": ("🌐 Lingo Translation\n" + $corrected)
+        }'
     else
-      echo "📝 Lingo Correction" >&2
-      echo "$explanation" >&2
-      echo "Improved prompt: $corrected_text" >&2
+      jq -n \
+        --arg explanation "$explanation" \
+        --arg corrected "$corrected_text" \
+        '{
+          "continue": true,
+          "systemMessage": ("📝 Lingo Correction\n" + $explanation + "\nImproved: " + $corrected)
+        }'
     fi
+    exit 0
   fi
 elif [ -n "$alternative" ] && [ "$alternative" != "null" ]; then
-  # Show alternative (both non-block and block modes)
-  echo "💬 Lingo Suggestion" >&2
-  echo "$explanation" >&2
-  echo "Alternative: $alternative" >&2
+  # Show alternative via systemMessage (both non-block and block modes)
+  jq -n \
+    --arg explanation "$explanation" \
+    --arg alternative "$alternative" \
+    '{
+      "continue": true,
+      "systemMessage": ("💬 Lingo Suggestion\n" + $explanation + "\nAlternative: " + $alternative)
+    }'
+  exit 0
 fi
 
 echo "$CONTINUE_RESPONSE"
