@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig, saveConfig, getConfigPath, SERVER_VERSION } from "./config.js";
-import { ConfigSchema, ToneSchema, LogLevelSchema, ModeSchema } from "./validation.js";
+import { ConfigSchema, ToneSchema, LogLevelSchema, ModeSchema, TimeRangeSchema, GroupBySchema } from "./validation.js";
+import { gatherReviewData, analyzeWithAI, formatReviewOutput } from "./review.js";
 
 // Create MCP server instance
 export const mcpServer = new McpServer({
@@ -131,5 +132,68 @@ mcpServer.tool(
         },
       ],
     };
+  }
+);
+
+// Tool: learning_review - Get learning insights and review items
+mcpServer.tool(
+  "learning_review",
+  "Get aggregated insights from your language learning history including frequent errors, vocabulary patterns, items due for review, and AI-generated study recommendations",
+  {
+    timeRange: TimeRangeSchema.optional().describe(
+      "Time range to analyze: 'day', 'week', 'month', or 'all' (default: 'week')"
+    ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("Maximum number of items per category to return (default: 10)"),
+    groupBy: GroupBySchema.optional().describe(
+      "How to group results: 'error_type', 'date', or 'project' (default: 'error_type')"
+    ),
+  },
+  async (params) => {
+    console.debug("MCP tool: learning_review", params);
+
+    const timeRange = params.timeRange || "week";
+    const limit = params.limit || 10;
+    const groupBy = params.groupBy || "error_type";
+
+    try {
+      // Gather data from database
+      const data = await gatherReviewData(timeRange, limit);
+
+      // Get AI-generated insights
+      const aiInsights = await analyzeWithAI(data);
+
+      // Format output as markdown
+      const output = formatReviewOutput(data, aiInsights, groupBy);
+
+      console.debug(
+        `MCP tool: learning_review complete - ${data.stats.totalCorrections} corrections, ${data.stats.totalAlternatives} alternatives`
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("learning_review failed:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Failed to generate learning review: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 );

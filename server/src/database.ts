@@ -14,6 +14,10 @@ export interface PromptRecord {
   correction: string | null;
   alternative: string | null;
   created_at: string;
+  // Spaced repetition fields (migration v3)
+  review_count: number;
+  next_review_at: string | null;
+  ease_factor: number;
 }
 
 interface Migration {
@@ -51,6 +55,16 @@ const MIGRATIONS: Migration[] = [
     name: "add_alternative_column",
     up: (db) => {
       db.exec(`ALTER TABLE prompts ADD COLUMN alternative TEXT`);
+    },
+  },
+  {
+    version: 3,
+    name: "add_spaced_repetition_columns",
+    up: (db) => {
+      db.exec(`ALTER TABLE prompts ADD COLUMN review_count INTEGER DEFAULT 0`);
+      db.exec(`ALTER TABLE prompts ADD COLUMN next_review_at TEXT`);
+      db.exec(`ALTER TABLE prompts ADD COLUMN ease_factor REAL DEFAULT 2.5`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_next_review ON prompts(next_review_at)`);
     },
   },
 ];
@@ -159,4 +173,120 @@ export function closeDb(): void {
     db = null;
     console.info("Database closed");
   }
+}
+
+// Review query functions
+
+export type TimeRange = "day" | "week" | "month" | "all";
+
+function getTimeRangeFilter(timeRange: TimeRange): string {
+  const now = new Date();
+  switch (timeRange) {
+    case "day":
+      return new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    case "week":
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    case "month":
+      return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    default:
+      return "1970-01-01T00:00:00.000Z";
+  }
+}
+
+export function getCorrectionsInRange(timeRange: TimeRange, limit: number): PromptRecord[] {
+  const database = getDb();
+  const since = getTimeRangeFilter(timeRange);
+  return database
+    .prepare(
+      `SELECT * FROM prompts
+       WHERE has_correction = 1 AND created_at >= ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(since, limit) as PromptRecord[];
+}
+
+export function getAlternativesInRange(timeRange: TimeRange, limit: number): PromptRecord[] {
+  const database = getDb();
+  const since = getTimeRangeFilter(timeRange);
+  return database
+    .prepare(
+      `SELECT * FROM prompts
+       WHERE alternative IS NOT NULL AND has_correction = 0 AND created_at >= ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(since, limit) as PromptRecord[];
+}
+
+export function getItemsDueForReview(limit: number): PromptRecord[] {
+  const database = getDb();
+  const now = new Date().toISOString();
+  return database
+    .prepare(
+      `SELECT * FROM prompts
+       WHERE (has_correction = 1 OR alternative IS NOT NULL)
+         AND (next_review_at IS NULL OR next_review_at <= ?)
+       ORDER BY next_review_at ASC NULLS FIRST
+       LIMIT ?`
+    )
+    .all(now, limit) as PromptRecord[];
+}
+
+export function updateReviewStatus(
+  id: number,
+  reviewCount: number,
+  easeFactor: number,
+  nextReviewAt: string
+): void {
+  const database = getDb();
+  database
+    .prepare(
+      `UPDATE prompts
+       SET review_count = ?, ease_factor = ?, next_review_at = ?
+       WHERE id = ?`
+    )
+    .run(reviewCount, easeFactor, nextReviewAt, id);
+}
+
+export interface ReviewStats {
+  totalPrompts: number;
+  totalCorrections: number;
+  totalAlternatives: number;
+  itemsDueForReview: number;
+}
+
+export function getStatsSummary(timeRange: TimeRange): ReviewStats {
+  const database = getDb();
+  const since = getTimeRangeFilter(timeRange);
+  const now = new Date().toISOString();
+
+  const totalPrompts = database
+    .prepare(`SELECT COUNT(*) as count FROM prompts WHERE created_at >= ?`)
+    .get(since) as { count: number };
+
+  const totalCorrections = database
+    .prepare(`SELECT COUNT(*) as count FROM prompts WHERE has_correction = 1 AND created_at >= ?`)
+    .get(since) as { count: number };
+
+  const totalAlternatives = database
+    .prepare(
+      `SELECT COUNT(*) as count FROM prompts WHERE alternative IS NOT NULL AND has_correction = 0 AND created_at >= ?`
+    )
+    .get(since) as { count: number };
+
+  const itemsDueForReview = database
+    .prepare(
+      `SELECT COUNT(*) as count FROM prompts
+       WHERE (has_correction = 1 OR alternative IS NOT NULL)
+         AND (next_review_at IS NULL OR next_review_at <= ?)`
+    )
+    .get(now) as { count: number };
+
+  return {
+    totalPrompts: totalPrompts.count,
+    totalCorrections: totalCorrections.count,
+    totalAlternatives: totalAlternatives.count,
+    itemsDueForReview: itemsDueForReview.count,
+  };
 }

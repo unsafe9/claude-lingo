@@ -1,46 +1,6 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { execSync } from "child_process";
-import { existsSync } from "fs";
 import { getConfig } from "./config.js";
 import { insertPrompt } from "./database.js";
-
-let cachedClaudePath: string | null = null;
-
-function detectClaudeExecutable(): string | undefined {
-  if (cachedClaudePath !== null) {
-    return cachedClaudePath || undefined;
-  }
-
-  // Common paths to check
-  const commonPaths = [
-    "/usr/local/bin/claude",
-    "/opt/homebrew/bin/claude",
-    `${process.env.HOME}/.local/bin/claude`,
-    `${process.env.HOME}/.npm-global/bin/claude`,
-  ];
-
-  // Try 'which claude' first
-  try {
-    const whichResult = execSync("which claude", { encoding: "utf-8" }).trim();
-    if (whichResult && existsSync(whichResult)) {
-      cachedClaudePath = whichResult;
-      return cachedClaudePath;
-    }
-  } catch {
-    // which failed, try common paths
-  }
-
-  // Check common paths
-  for (const path of commonPaths) {
-    if (existsSync(path)) {
-      cachedClaudePath = path;
-      return cachedClaudePath;
-    }
-  }
-
-  cachedClaudePath = "";
-  return undefined;
-}
+import { queryClaudeAI, withRetry } from "./claude.js";
 
 import type { Tone } from "./validation.js";
 
@@ -135,35 +95,6 @@ OTHERWISE, analyze the ${targetLang} text:
 Respond ONLY with valid JSON, no other text.`;
 }
 
-// Retry with exponential backoff
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
-): Promise<T> {
-  const { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 10000 } = options;
-
-  let lastError: Error | undefined;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error as Error;
-
-      if (attempt < maxRetries) {
-        const delay = Math.min(baseDelayMs * Math.pow(2, attempt), maxDelayMs);
-        console.warn(
-          `Attempt ${attempt + 1}/${maxRetries + 1} failed, retrying in ${delay}ms:`,
-          lastError.message
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-  }
-
-  throw lastError;
-}
-
 async function executeAnalysis(
   prompt: string,
   targetLang: string,
@@ -172,41 +103,17 @@ async function executeAnalysis(
   claudeExecutablePath?: string
 ): Promise<AnalysisResult> {
   const config = getConfig();
-  const executablePath = claudeExecutablePath || config.claudeExecutablePath || detectClaudeExecutable();
 
   console.debug(`Analyzing prompt (${prompt.length} chars, model: ${config.model}, context: ${recentPrompts.length} recent)`);
 
   const analysisPrompt = buildAnalysisPrompt(prompt, targetLang, tone, recentPrompts);
-
-  const options: Parameters<typeof query>[0]["options"] = {
-    model: config.model,
-    maxTurns: 1,
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
-    systemPrompt: "You are a language analysis assistant. Respond only with valid JSON.",
-  };
-
-  if (executablePath) {
-    options.pathToClaudeCodeExecutable = executablePath;
-  }
-
-  let resultText = "";
   const startTime = Date.now();
 
-  for await (const message of query({ prompt: analysisPrompt, options })) {
-    if (message.type === "assistant") {
-      for (const block of message.message.content) {
-        if (block.type === "text") {
-          resultText += block.text;
-        }
-      }
-    }
-    if (message.type === "result") {
-      if (message.subtype === "success" && message.result) {
-        resultText = message.result;
-      }
-    }
-  }
+  const resultText = await queryClaudeAI(analysisPrompt, {
+    model: config.model,
+    systemPrompt: "You are a language analysis assistant. Respond only with valid JSON.",
+    claudeExecutablePath,
+  });
 
   const duration = Date.now() - startTime;
 

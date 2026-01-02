@@ -53,3 +53,10 @@ export type ValidatedConfigUpdate = z.infer<typeof ConfigUpdateSchema>;
 export function formatZodErrors(error: z.ZodError): string[] {
   return error.issues.map((e) => `${e.path.join(".")}: ${e.message}`);
 }
+
+// Review tool schemas
+export const TimeRangeSchema = z.enum(["day", "week", "month", "all"]);
+export type TimeRange = z.infer<typeof TimeRangeSchema>;
+
+export const GroupBySchema = z.enum(["error_type", "date", "project"]);
+export type GroupBy = z.infer<typeof GroupBySchema>;
