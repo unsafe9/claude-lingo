@@ -1,0 +1,29 @@
+{
+  "description": "Hooks for capturing prompts and ensuring background process is running",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ensure-process.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/send-prompt.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

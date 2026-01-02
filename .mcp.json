@@ -1,0 +1,6 @@
+{
+  "lingo": {
+    "type": "http",
+    "url": "http://localhost:41765/mcp"
+  }
+}
