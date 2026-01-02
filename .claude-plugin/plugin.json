@@ -1,6 +1,6 @@
 {
   "name": "lingo",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Captures user prompts and sends them to a background process for language learning analysis",
   "author": {
     "name": "unsafe9"
