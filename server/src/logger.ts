@@ -31,10 +31,6 @@ export function setLogLevel(level: LogLevel): void {
   currentLevel = level;
 }
 
-export function getLogLevel(): LogLevel {
-  return currentLevel;
-}
-
 // Override console methods
 console.debug = (...args: unknown[]) => {
   if (shouldLog("debug")) {

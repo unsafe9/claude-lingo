@@ -20,6 +20,7 @@ const sessions = new Map<string, SessionData>();
 // Config
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RECENT_PROMPTS = 5;
+const MAX_CACHE_SIZE_PER_SESSION = 100; // Prevent unbounded memory growth
 const SESSION_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const SESSION_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -67,6 +68,18 @@ export function getCachedResult(sessionId: string, prompt: string): AnalysisResu
 export function cacheResult(sessionId: string, prompt: string, result: AnalysisResult): void {
   const session = getOrCreateSession(sessionId);
   const now = Date.now();
+
+  // Enforce max cache size by removing oldest entries if needed
+  if (session.cache.size >= MAX_CACHE_SIZE_PER_SESSION) {
+    // Remove oldest entries (first 10% of cache)
+    const entriesToRemove = Math.ceil(MAX_CACHE_SIZE_PER_SESSION * 0.1);
+    const iterator = session.cache.keys();
+    for (let i = 0; i < entriesToRemove; i++) {
+      const key = iterator.next().value;
+      if (key) session.cache.delete(key);
+    }
+    console.debug(`Cache limit reached for session ${sessionId.slice(0, 8)}..., evicted ${entriesToRemove} entries`);
+  }
 
   // Cache the original prompt's result
   session.cache.set(prompt, {

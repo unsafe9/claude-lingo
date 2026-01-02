@@ -1,5 +1,9 @@
 import { Database } from "bun:sqlite";
 import { getDbPath, ensureConfigDir } from "./config.js";
+import type { TimeRange } from "./validation.js";
+
+// Re-export TimeRange for backward compatibility
+export type { TimeRange } from "./validation.js";
 
 export interface PromptRecord {
   id: number;
@@ -118,7 +122,7 @@ function runMigrations(database: Database): void {
   console.info("All migrations applied successfully");
 }
 
-export function getDb(): Database {
+function getDb(): Database {
   if (!db) {
     ensureConfigDir();
     db = new Database(getDbPath());
@@ -159,14 +163,6 @@ export function insertPrompt(data: {
   return result.lastInsertRowid as number;
 }
 
-export function getRecentPrompts(limit = 50): PromptRecord[] {
-  const database = getDb();
-  const stmt = database.prepare(`
-    SELECT * FROM prompts ORDER BY id DESC LIMIT ?
-  `);
-  return stmt.all(limit) as PromptRecord[];
-}
-
 export function closeDb(): void {
   if (db) {
     db.close();
@@ -176,8 +172,6 @@ export function closeDb(): void {
 }
 
 // Review query functions
-
-export type TimeRange = "day" | "week" | "month" | "all";
 
 function getTimeRangeFilter(timeRange: TimeRange): string {
   const now = new Date();
@@ -263,17 +257,17 @@ export function getStatsSummary(timeRange: TimeRange): ReviewStats {
 
   const totalPrompts = database
     .prepare(`SELECT COUNT(*) as count FROM prompts WHERE created_at >= ?`)
-    .get(since) as { count: number };
+    .get(since) as { count: number } | undefined;
 
   const totalCorrections = database
     .prepare(`SELECT COUNT(*) as count FROM prompts WHERE has_correction = 1 AND created_at >= ?`)
-    .get(since) as { count: number };
+    .get(since) as { count: number } | undefined;
 
   const totalAlternatives = database
     .prepare(
       `SELECT COUNT(*) as count FROM prompts WHERE alternative IS NOT NULL AND has_correction = 0 AND created_at >= ?`
     )
-    .get(since) as { count: number };
+    .get(since) as { count: number } | undefined;
 
   const itemsDueForReview = database
     .prepare(
@@ -281,12 +275,12 @@ export function getStatsSummary(timeRange: TimeRange): ReviewStats {
        WHERE (has_correction = 1 OR alternative IS NOT NULL)
          AND (next_review_at IS NULL OR next_review_at <= ?)`
     )
-    .get(now) as { count: number };
+    .get(now) as { count: number } | undefined;
 
   return {
-    totalPrompts: totalPrompts.count,
-    totalCorrections: totalCorrections.count,
-    totalAlternatives: totalAlternatives.count,
-    itemsDueForReview: itemsDueForReview.count,
+    totalPrompts: totalPrompts?.count ?? 0,
+    totalCorrections: totalCorrections?.count ?? 0,
+    totalAlternatives: totalAlternatives?.count ?? 0,
+    itemsDueForReview: itemsDueForReview?.count ?? 0,
   };
 }

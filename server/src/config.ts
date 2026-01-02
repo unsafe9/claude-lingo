@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, watch, type FSWatcher } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { ConfigSchema, KNOWN_CONFIG_KEYS, type Config } from "./validation.js";
+import { ConfigSchema, KNOWN_CONFIG_KEYS, formatZodErrors, type Config } from "./validation.js";
 
 export type { Config } from "./validation.js";
 
@@ -61,7 +61,12 @@ export const SERVER_VERSION = pkg.version;
 export function ensureConfigDir(): void {
   const configDir = getConfigDir();
   if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
+    try {
+      mkdirSync(configDir, { recursive: true });
+    } catch (error) {
+      console.error(`Failed to create config directory ${configDir}:`, error);
+      throw error;
+    }
   }
 }
 
@@ -85,8 +90,7 @@ export function loadConfig(): Config {
     // Validate the merged config
     const result = ConfigSchema.safeParse(merged);
     if (!result.success) {
-      const errors = result.error.issues.map((e) => `${e.path.join(".")}: ${e.message}`);
-      console.error("Config validation failed, using defaults. Errors:", errors);
+      console.error("Config validation failed, using defaults. Errors:", formatZodErrors(result.error));
       console.error("Please fix your config at:", configPath);
       return DEFAULT_CONFIG;
     }
@@ -111,11 +115,17 @@ export function loadConfig(): Config {
 export function saveConfig(config: Config): void {
   ensureConfigDir();
   const configPath = getConfigPath();
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  try {
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch (error) {
+    console.error(`Failed to save config to ${configPath}:`, error);
+    throw error;
+  }
 }
 
 let cachedConfig: Config | null = null;
 let configWatcher: FSWatcher | null = null;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 type ConfigChangeCallback = (config: Config) => void;
 const configChangeCallbacks = new Set<ConfigChangeCallback>();
@@ -150,10 +160,6 @@ export function onConfigChange(callback: ConfigChangeCallback): void {
   configChangeCallbacks.add(callback);
 }
 
-export function removeOnConfigChange(callback: ConfigChangeCallback): void {
-  configChangeCallbacks.delete(callback);
-}
-
 export function startConfigWatcher(): void {
   if (configWatcher) return;
 
@@ -164,8 +170,6 @@ export function startConfigWatcher(): void {
   if (!existsSync(configPath)) {
     saveConfig(DEFAULT_CONFIG);
   }
-
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   configWatcher = watch(configPath, (eventType) => {
     if (eventType === "change") {
@@ -184,6 +188,12 @@ export function startConfigWatcher(): void {
 }
 
 export function stopConfigWatcher(): void {
+  // Clear debounce timer to prevent memory leak and stale callbacks
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+
   if (configWatcher) {
     configWatcher.close();
     configWatcher = null;

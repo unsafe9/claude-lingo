@@ -241,11 +241,32 @@ app.all("/mcp", async (c) => {
       },
     });
 
-    // Connect to MCP server
-    await mcpServer.connect(transport);
+    try {
+      // Connect to MCP server
+      await mcpServer.connect(transport);
 
-    // Handle the request
-    return transport.handleRequest(c.req.raw);
+      // Handle the request
+      return transport.handleRequest(c.req.raw);
+    } catch (error) {
+      // Clean up transport on connection failure
+      console.error("MCP connection failed:", error);
+      try {
+        await transport.close();
+      } catch {
+        // Ignore close errors
+      }
+      return c.json(
+        {
+          jsonrpc: "2.0",
+          error: {
+            code: -32603,
+            message: "Internal error: MCP connection failed",
+          },
+          id: null,
+        },
+        500
+      );
+    }
   }
 
   // For requests with session ID, use existing transport
@@ -274,6 +295,7 @@ app.all("/mcp", async (c) => {
       await transport.close();
       mcpTransports.delete(sessionId);
       console.debug(`MCP session closed: ${sessionId}`);
+      return c.json({ success: true }, 200);
     }
 
     return transport.handleRequest(c.req.raw);
@@ -317,8 +339,17 @@ const server = Bun.serve({
   fetch: app.fetch,
 });
 
-// Graceful shutdown (SIGTERM)
+// Shutdown state
+let isShuttingDown = false;
+
+// Graceful shutdown (SIGTERM and SIGINT)
 async function gracefulShutdown() {
+  if (isShuttingDown) {
+    console.warn("Shutdown already in progress, forcing exit...");
+    process.exit(1);
+  }
+  isShuttingDown = true;
+
   console.info("Shutting down gracefully...");
 
   // Stop accepting new connections
@@ -326,8 +357,12 @@ async function gracefulShutdown() {
 
   // Close all MCP transports
   for (const [id, transport] of mcpTransports) {
-    await transport.close();
-    console.debug(`MCP session closed: ${id}`);
+    try {
+      await transport.close();
+      console.debug(`MCP session closed: ${id}`);
+    } catch (error) {
+      console.warn(`Failed to close MCP session ${id}:`, error);
+    }
   }
   mcpTransports.clear();
 
@@ -350,11 +385,5 @@ async function gracefulShutdown() {
   process.exit(0);
 }
 
-// Force shutdown (SIGINT / Ctrl+C)
-function forceShutdown() {
-  console.warn("Force shutdown...");
-  process.exit(0);
-}
-
 process.on("SIGTERM", gracefulShutdown);
-process.on("SIGINT", forceShutdown);
+process.on("SIGINT", gracefulShutdown);

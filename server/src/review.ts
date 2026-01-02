@@ -34,7 +34,7 @@ const ERROR_PATTERNS: ErrorPattern[] = [
   { pattern: /punctuation/i, category: "punctuation", type: "punctuation" },
 ];
 
-export interface ErrorAggregate {
+interface ErrorAggregate {
   category: string;
   type: string;
   count: number;
@@ -46,7 +46,7 @@ export interface ErrorAggregate {
   }>;
 }
 
-export interface VocabularyInsight {
+interface VocabularyInsight {
   original: string;
   alternative: string;
   explanation: string;
@@ -54,7 +54,7 @@ export interface VocabularyInsight {
   lastSeen: string;
 }
 
-export interface AggregatedData {
+interface AggregatedData {
   stats: ReviewStats;
   timeRange: TimeRange;
   errorPatterns: Map<string, ErrorAggregate>;
@@ -62,14 +62,14 @@ export interface AggregatedData {
   dueForReview: PromptRecord[];
 }
 
-export interface AIInsights {
+interface AIInsights {
   recommendations: string[];
   priorityAreas: string[];
   progressNotes: string[];
 }
 
 // Categorize an error based on analysis_result text
-export function categorizeError(analysisResult: string): { category: string; type: string } {
+function categorizeError(analysisResult: string): { category: string; type: string } {
   for (const { pattern, category, type } of ERROR_PATTERNS) {
     if (pattern.test(analysisResult)) {
       return { category, type };
@@ -79,7 +79,7 @@ export function categorizeError(analysisResult: string): { category: string; typ
 }
 
 // Aggregate error patterns from records
-export function aggregateErrorPatterns(records: PromptRecord[]): Map<string, ErrorAggregate> {
+function aggregateErrorPatterns(records: PromptRecord[]): Map<string, ErrorAggregate> {
   const aggregated = new Map<string, ErrorAggregate>();
 
   for (const record of records) {
@@ -112,7 +112,7 @@ export function aggregateErrorPatterns(records: PromptRecord[]): Map<string, Err
 }
 
 // Aggregate vocabulary insights from alternative suggestions
-export function aggregateVocabularyInsights(records: PromptRecord[]): VocabularyInsight[] {
+function aggregateVocabularyInsights(records: PromptRecord[]): VocabularyInsight[] {
   const insightMap = new Map<string, VocabularyInsight>();
 
   for (const record of records) {
@@ -140,8 +140,8 @@ export function aggregateVocabularyInsights(records: PromptRecord[]): Vocabulary
   return Array.from(insightMap.values()).sort((a, b) => b.count - a.count);
 }
 
-// SM-2 Spaced Repetition Algorithm
-export function calculateNextReview(
+// SM-2 Spaced Repetition Algorithm (currently unused - feature incomplete)
+function calculateNextReview(
   easeFactor: number,
   reviewCount: number,
   quality: number // 0-5: 0-2 = fail, 3-5 = pass
@@ -173,8 +173,8 @@ export function calculateNextReview(
   return { nextInterval, newEaseFactor };
 }
 
-// Mark an item as reviewed
-export function markItemReviewed(id: number, currentEaseFactor: number, currentReviewCount: number, quality: number): void {
+// Mark an item as reviewed (currently unused - feature incomplete)
+function markItemReviewed(id: number, currentEaseFactor: number, currentReviewCount: number, quality: number): void {
   const { nextInterval, newEaseFactor } = calculateNextReview(currentEaseFactor, currentReviewCount, quality);
   const nextReviewAt = new Date(Date.now() + nextInterval * 24 * 60 * 60 * 1000).toISOString();
   updateReviewStatus(id, currentReviewCount + 1, newEaseFactor, nextReviewAt);
@@ -268,10 +268,10 @@ export async function analyzeWithAI(data: AggregatedData): Promise<AIInsights> {
 }
 
 // Gather all review data
-export async function gatherReviewData(
+export function gatherReviewData(
   timeRange: TimeRange,
   limit: number
-): Promise<AggregatedData> {
+): AggregatedData {
   const stats = getStatsSummary(timeRange);
   const corrections = getCorrectionsInRange(timeRange, limit);
   const alternatives = getAlternativesInRange(timeRange, limit);

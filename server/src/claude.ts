@@ -77,6 +77,10 @@ export async function queryClaudeAI(prompt: string, options: QueryOptions = {}):
     }
   }
 
+  if (!resultText.trim()) {
+    throw new Error("Claude API returned empty response");
+  }
+
   return resultText;
 }
 

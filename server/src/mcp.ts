@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getConfig, saveConfig, getConfigPath, SERVER_VERSION } from "./config.js";
-import { ConfigSchema, ToneSchema, LogLevelSchema, ModeSchema, TimeRangeSchema, GroupBySchema } from "./validation.js";
+import { ConfigSchema, ToneSchema, LogLevelSchema, ModeSchema, TimeRangeSchema, GroupBySchema, formatZodErrors } from "./validation.js";
 import { gatherReviewData, analyzeWithAI, formatReviewOutput } from "./review.js";
 
 // Create MCP server instance
@@ -107,7 +107,7 @@ mcpServer.tool(
     const result = ConfigSchema.safeParse(newConfig);
 
     if (!result.success) {
-      const errors = result.error.issues.map((e) => `${e.path.join(".")}: ${e.message}`);
+      const errors = formatZodErrors(result.error);
       console.debug("MCP tool: update_config validation failed", errors);
       return {
         content: [
@@ -163,7 +163,7 @@ mcpServer.tool(
 
     try {
       // Gather data from database
-      const data = await gatherReviewData(timeRange, limit);
+      const data = gatherReviewData(timeRange, limit);
 
       // Get AI-generated insights
       const aiInsights = await analyzeWithAI(data);

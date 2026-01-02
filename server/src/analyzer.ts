@@ -99,8 +99,7 @@ async function executeAnalysis(
   prompt: string,
   targetLang: string,
   tone: Tone,
-  recentPrompts: string[] = [],
-  claudeExecutablePath?: string
+  recentPrompts: string[] = []
 ): Promise<AnalysisResult> {
   const config = getConfig();
 
@@ -112,7 +111,6 @@ async function executeAnalysis(
   const resultText = await queryClaudeAI(analysisPrompt, {
     model: config.model,
     systemPrompt: "You are a language analysis assistant. Respond only with valid JSON.",
-    claudeExecutablePath,
   });
 
   const duration = Date.now() - startTime;
@@ -152,11 +150,11 @@ async function executeAnalysis(
 
       return result;
     }
-  } catch {
-    // Failed to parse, return default
+  } catch (error) {
+    console.warn(`Analysis (${duration}ms): JSON parse failed:`, error instanceof Error ? error.message : error);
   }
 
-  console.debug(`Analysis (${duration}ms): parse failed`);
+  console.debug(`Analysis (${duration}ms): parse failed, returning default result`);
   return {
     skip: false,
     hasCorrection: false,
@@ -172,17 +170,16 @@ export async function analyzePrompt(
   prompt: string,
   targetLang: string,
   tone: Tone,
-  recentPrompts: string[] = [],
-  claudeExecutablePath?: string
+  recentPrompts: string[] = []
 ): Promise<AnalysisResult> {
-  return withRetry(() => executeAnalysis(prompt, targetLang, tone, recentPrompts, claudeExecutablePath), {
+  return withRetry(() => executeAnalysis(prompt, targetLang, tone, recentPrompts), {
     maxRetries: 2,
     baseDelayMs: 500,
   });
 }
 
 // In-memory queue for background analysis
-export interface QueuedPrompt {
+interface QueuedPrompt {
   prompt: string;
   timestamp: string;
   session_id: string;
@@ -202,7 +199,7 @@ export function getPendingQueueCount(): number {
 
 // Background queue processing
 let isProcessing = false;
-let processingInterval: ReturnType<typeof setInterval> | null = null;
+let processingInterval: ReturnType<typeof setTimeout> | null = null;
 let shutdownRequested = false;
 let currentProcessingPromise: Promise<void> | null = null;
 
@@ -268,10 +265,17 @@ export function startBackgroundProcessor(): void {
   const config = getConfig();
   const intervalMs = config.queueIntervalMs;
 
-  processingInterval = setInterval(() => {
-    currentProcessingPromise = processQueue();
-  }, intervalMs);
+  // Use recursive setTimeout instead of setInterval to prevent overlapping executions
+  function scheduleNextRun(): void {
+    if (shutdownRequested) return;
+    processingInterval = setTimeout(async () => {
+      currentProcessingPromise = processQueue();
+      await currentProcessingPromise;
+      scheduleNextRun();
+    }, intervalMs);
+  }
 
+  scheduleNextRun();
   console.info(`Background processor started (interval: ${intervalMs}ms, batch: ${config.queueBatchSize})`);
 }
 
@@ -279,7 +283,7 @@ export function stopBackgroundProcessor(): void {
   shutdownRequested = true;
 
   if (processingInterval) {
-    clearInterval(processingInterval);
+    clearTimeout(processingInterval);
     processingInterval = null;
     console.info("Background processor stopped");
   }
@@ -290,8 +294,4 @@ export async function waitForQueueDrain(): Promise<void> {
     console.info("Waiting for current processing to complete...");
     await currentProcessingPromise;
   }
-}
-
-export function isShuttingDown(): boolean {
-  return shutdownRequested;
 }
