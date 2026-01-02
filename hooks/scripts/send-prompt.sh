@@ -123,32 +123,43 @@ if [ "$has_correction" = "true" ]; then
   else
     # Non-block mode or minor correction: show via systemMessage and continue
     if [ "$is_translation" = "true" ]; then
-      # For translations: just show title and translated text
+      # Translation: single line with translated text
       jq -n \
         --arg corrected "$corrected_text" \
         '{
           "continue": true,
-          "systemMessage": ("🌐 Lingo Translation\n" + $corrected)
+          "systemMessage": ("🌐 " + $corrected)
+        }'
+    elif [ "$significant" = "true" ]; then
+      # Significant correction: corrected text in systemMessage, explanation to stderr (verbose mode)
+      echo "📝 Correction:" >&2
+      echo "$explanation" >&2
+      jq -n \
+        --arg corrected "$corrected_text" \
+        '{
+          "continue": true,
+          "systemMessage": ("📝 " + $corrected)
         }'
     else
+      # Minor fix: single line with explanation only (no corrected text)
       jq -n \
         --arg explanation "$explanation" \
-        --arg corrected "$corrected_text" \
         '{
           "continue": true,
-          "systemMessage": ("📝 Lingo Correction\n" + $explanation + "\nImproved: " + $corrected)
+          "systemMessage": ("📝 " + $explanation)
         }'
     fi
     exit 0
   fi
 elif [ -n "$alternative" ] && [ "$alternative" != "null" ]; then
-  # Show alternative via systemMessage (both non-block and block modes)
+  # Alternative: alternative in systemMessage, explanation to stderr (verbose mode)
+  echo "💬 Alternative:" >&2
+  echo "$explanation" >&2
   jq -n \
-    --arg explanation "$explanation" \
     --arg alternative "$alternative" \
     '{
       "continue": true,
-      "systemMessage": ("💬 Lingo Suggestion\n" + $explanation + "\nAlternative: " + $alternative)
+      "systemMessage": ("💬 " + $alternative)
     }'
   exit 0
 fi

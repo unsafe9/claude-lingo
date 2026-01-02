@@ -84,15 +84,15 @@ OTHERWISE, analyze the ${targetLang} text:
    - Ignore minor issues like missing capitalization or missing commas/periods (acceptable in casual coding communication)
    - Set "significant": true for grammar errors, wrong word usage, or unnatural expressions that affect meaning
    - Set "significant": false for minor typos or small mistakes that don't affect understanding
-   - Return: {"hasCorrection": true, "correction": "<corrected version>", "alternative": null, "significant": <true or false>, "explanation": "<bullet-listed explanation using '- **title:** description' format, where title is 1-3 words like 'article', 'tense', 'word choice', 'unnatural'>"}
-   - Explanation MUST ONLY describe what was corrected - NO general advice, context, or commentary
+   - Return: {"hasCorrection": true, "correction": "<corrected version>", "alternative": null, "significant": <true or false>, "explanation": "<single-line explanation in 'Title: description' format, where Title is capitalized 1-3 words like 'Article', 'Tense', 'Word choice', 'Unnatural'>"}
+   - Explanation MUST be a single line describing what was corrected - NO bullet points, general advice, context, or commentary
 
 3. If the text is correct and natural, suggest an alternative way to express the same idea:
    - Set "significant": true ONLY if the alternative is significantly more natural, idiomatic, or better than the original (worth learning)
    - Set "significant": false if the alternative is just a minor variation with similar quality
    - Do NOT suggest alternatives that match or are very similar to any of the recent prompts shown above
-   - Return: {"hasCorrection": false, "correction": null, "alternative": "<alternative expression>", "significant": <true or false>, "explanation": "<bullet-listed notes on nuance differences using '- **title:** description' format, where title is 1-3 words like 'tone', 'nuance', 'formality', 'idiom'>"}
-   - Explanation MUST ONLY describe nuance/tone differences - NO general advice, context, or commentary
+   - Return: {"hasCorrection": false, "correction": null, "alternative": "<alternative expression>", "significant": <true or false>, "explanation": "<single-line note on nuance in 'Title: description' format, where Title is capitalized 1-3 words like 'Tone', 'Nuance', 'Formality', 'Idiom'>"}
+   - Explanation MUST be a single line describing nuance/tone differences - NO bullet points, general advice, context, or commentary
 
 Respond ONLY with valid JSON, no other text.`;
 }
