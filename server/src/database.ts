@@ -17,7 +17,6 @@ export interface PromptRecord {
   has_correction: boolean;
   correction: string | null;
   alternative: string | null;
-  categories: string | null;  // JSON array of category strings
   created_at: string;
   // Spaced repetition fields (migration v3)
   review_count: number;
@@ -74,10 +73,16 @@ const MIGRATIONS: Migration[] = [
   },
   {
     version: 4,
-    name: "add_categories_column",
+    name: "create_prompt_categories_table",
     up: (db) => {
-      db.exec(`ALTER TABLE prompts ADD COLUMN categories TEXT`);
-      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_categories ON prompts(categories)`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS prompt_categories (
+          prompt_id INTEGER NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+          category TEXT NOT NULL,
+          PRIMARY KEY (prompt_id, category)
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompt_categories_category ON prompt_categories(category)`);
     },
   },
 ];
@@ -154,9 +159,11 @@ export function insertPrompt(data: {
   categories?: string[];
 }): number {
   const database = getDb();
+
+  // Insert prompt
   const stmt = database.prepare(`
-    INSERT INTO prompts (prompt, timestamp, session_id, cwd, project_dir, analyzed, analysis_result, has_correction, correction, alternative, categories)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prompts (prompt, timestamp, session_id, cwd, project_dir, analyzed, analysis_result, has_correction, correction, alternative)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.prompt,
@@ -168,10 +175,22 @@ export function insertPrompt(data: {
     data.analysis_result ?? null,
     data.has_correction ? 1 : 0,
     data.correction ?? null,
-    data.alternative ?? null,
-    data.categories ? JSON.stringify(data.categories) : null
+    data.alternative ?? null
   );
-  return result.lastInsertRowid as number;
+
+  const promptId = result.lastInsertRowid as number;
+
+  // Insert categories into junction table
+  if (data.categories && data.categories.length > 0) {
+    const catStmt = database.prepare(`
+      INSERT OR IGNORE INTO prompt_categories (prompt_id, category) VALUES (?, ?)
+    `);
+    for (const category of data.categories) {
+      catStmt.run(promptId, category);
+    }
+  }
+
+  return promptId;
 }
 
 export function closeDb(): void {
@@ -180,6 +199,55 @@ export function closeDb(): void {
     db = null;
     console.info("Database closed");
   }
+}
+
+// Get categories for a specific prompt
+export function getCategoriesForPrompt(promptId: number): string[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`SELECT category FROM prompt_categories WHERE prompt_id = ?`)
+    .all(promptId) as { category: string }[];
+  return rows.map((r) => r.category);
+}
+
+// Category aggregation for review
+export interface CategoryCount {
+  category: string;
+  count: number;
+}
+
+export function getCategoryCounts(timeRange: TimeRange): CategoryCount[] {
+  const database = getDb();
+  const since = getTimeRangeFilter(timeRange);
+  return database
+    .prepare(
+      `SELECT pc.category, COUNT(*) as count
+       FROM prompt_categories pc
+       JOIN prompts p ON pc.prompt_id = p.id
+       WHERE p.created_at >= ?
+       GROUP BY pc.category
+       ORDER BY count DESC`
+    )
+    .all(since) as CategoryCount[];
+}
+
+// Get prompts with a specific category
+export function getPromptsByCategory(
+  category: string,
+  timeRange: TimeRange,
+  limit: number
+): PromptRecord[] {
+  const database = getDb();
+  const since = getTimeRangeFilter(timeRange);
+  return database
+    .prepare(
+      `SELECT p.* FROM prompts p
+       JOIN prompt_categories pc ON p.id = pc.prompt_id
+       WHERE pc.category = ? AND p.created_at >= ?
+       ORDER BY p.created_at DESC
+       LIMIT ?`
+    )
+    .all(category, since, limit) as PromptRecord[];
 }
 
 // Review query functions

@@ -2,11 +2,13 @@ import {
   type PromptRecord,
   type TimeRange,
   type ReviewStats,
-  getCorrectionsInRange,
+  type CategoryCount,
   getAlternativesInRange,
   getItemsDueForReview,
   getStatsSummary,
   updateReviewStatus,
+  getCategoryCounts,
+  getPromptsByCategory,
 } from "./database.js";
 import { queryClaudeAI } from "./claude.js";
 import type { GroupBy } from "./validation.js";
@@ -63,46 +65,28 @@ interface AIInsights {
   progressNotes: string[];
 }
 
-// Parse categories from JSON string stored in database
-function parseCategories(categoriesJson: string | null): ExplanationCategory[] {
-  if (!categoriesJson) return ["other"];
-  try {
-    const parsed = JSON.parse(categoriesJson);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed as ExplanationCategory[];
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return ["other"];
-}
-
-// Aggregate error patterns from records using stored categories
-function aggregateErrorPatterns(records: PromptRecord[]): Map<ExplanationCategory, ErrorAggregate> {
+// Build error aggregates from category counts and sample prompts
+function buildErrorAggregates(
+  categoryCounts: CategoryCount[],
+  timeRange: TimeRange,
+  examplesPerCategory: number = 3
+): Map<ExplanationCategory, ErrorAggregate> {
   const aggregated = new Map<ExplanationCategory, ErrorAggregate>();
 
-  for (const record of records) {
-    const categories = parseCategories(record.categories);
+  for (const { category, count } of categoryCounts) {
+    // Get sample prompts for this category
+    const prompts = getPromptsByCategory(category, timeRange, examplesPerCategory);
 
-    for (const category of categories) {
-      const existing = aggregated.get(category) || {
-        category,
-        count: 0,
-        examples: [],
-      };
-
-      existing.count++;
-      if (existing.examples.length < 3) {
-        existing.examples.push({
-          original: record.prompt,
-          corrected: record.correction,
-          explanation: record.analysis_result || "",
-          date: record.created_at,
-        });
-      }
-
-      aggregated.set(category, existing);
-    }
+    aggregated.set(category as ExplanationCategory, {
+      category: category as ExplanationCategory,
+      count,
+      examples: prompts.map((p) => ({
+        original: p.prompt,
+        corrected: p.correction,
+        explanation: p.analysis_result || "",
+        date: p.created_at,
+      })),
+    });
   }
 
   return aggregated;
@@ -271,11 +255,12 @@ export function gatherReviewData(
   limit: number
 ): AggregatedData {
   const stats = getStatsSummary(timeRange);
-  const corrections = getCorrectionsInRange(timeRange, limit);
   const alternatives = getAlternativesInRange(timeRange, limit);
   const dueForReview = getItemsDueForReview(limit);
 
-  const errorPatterns = aggregateErrorPatterns(corrections);
+  // Get category counts from junction table
+  const categoryCounts = getCategoryCounts(timeRange);
+  const errorPatterns = buildErrorAggregates(categoryCounts, timeRange, 3);
   const vocabularyInsights = aggregateVocabularyInsights(alternatives);
 
   return {
