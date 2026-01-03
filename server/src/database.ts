@@ -33,7 +33,7 @@ interface Migration {
 const MIGRATIONS: Migration[] = [
   {
     version: 1,
-    name: "create_prompts_table",
+    name: "initial_schema",
     up: (db) => {
       db.exec(`
         CREATE TABLE IF NOT EXISTS prompts (
@@ -47,34 +47,17 @@ const MIGRATIONS: Migration[] = [
           analysis_result TEXT,
           has_correction INTEGER DEFAULT 0,
           correction TEXT,
+          alternative TEXT,
+          review_count INTEGER DEFAULT 0,
+          next_review_at TEXT,
+          ease_factor REAL DEFAULT 2.5,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
       `);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_analyzed ON prompts(analyzed)`);
-    },
-  },
-  {
-    version: 2,
-    name: "add_alternative_column",
-    up: (db) => {
-      db.exec(`ALTER TABLE prompts ADD COLUMN alternative TEXT`);
-    },
-  },
-  {
-    version: 3,
-    name: "add_spaced_repetition_columns",
-    up: (db) => {
-      db.exec(`ALTER TABLE prompts ADD COLUMN review_count INTEGER DEFAULT 0`);
-      db.exec(`ALTER TABLE prompts ADD COLUMN next_review_at TEXT`);
-      db.exec(`ALTER TABLE prompts ADD COLUMN ease_factor REAL DEFAULT 2.5`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_next_review ON prompts(next_review_at)`);
-    },
-  },
-  {
-    version: 4,
-    name: "create_prompt_categories_table",
-    up: (db) => {
+
       db.exec(`
         CREATE TABLE IF NOT EXISTS prompt_categories (
           prompt_id INTEGER NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,

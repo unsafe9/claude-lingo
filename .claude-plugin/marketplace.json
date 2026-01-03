@@ -1,0 +1,15 @@
+{
+  "name": "lingo",
+  "owner": {
+    "name": "unsafe9"
+  },
+  "plugins": [
+    {
+      "name": "lingo",
+      "source": ".",
+      "description": "Captures user prompts and sends them to a background process for language learning analysis",
+      "category": "productivity",
+      "tags": ["language-learning", "grammar", "writing"]
+    }
+  ]
+}
