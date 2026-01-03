@@ -10,33 +10,28 @@ import {
 } from "./database.js";
 import { queryClaudeAI } from "./claude.js";
 import type { GroupBy } from "./validation.js";
+import type { ExplanationCategory } from "./analyzer.js";
 
-// Error pattern categories for classification
-interface ErrorPattern {
-  pattern: RegExp;
-  category: string;
-  type: string;
-}
-
-const ERROR_PATTERNS: ErrorPattern[] = [
-  { pattern: /typo/i, category: "spelling", type: "typo" },
-  { pattern: /spell(ing)?/i, category: "spelling", type: "spelling_error" },
-  { pattern: /article.*missing|missing.*article/i, category: "grammar", type: "missing_article" },
-  { pattern: /capitalization/i, category: "grammar", type: "capitalization" },
-  { pattern: /grammar/i, category: "grammar", type: "grammar_error" },
-  { pattern: /tense/i, category: "grammar", type: "wrong_tense" },
-  { pattern: /preposition/i, category: "grammar", type: "preposition" },
-  { pattern: /vocabulary|vocab|word choice/i, category: "vocabulary", type: "word_choice" },
-  { pattern: /translate|translation/i, category: "translation", type: "non_target_language" },
-  { pattern: /idiom(atic)?/i, category: "vocabulary", type: "idiom" },
-  { pattern: /formal|informal/i, category: "register", type: "register_mismatch" },
-  { pattern: /plural|singular/i, category: "grammar", type: "number_agreement" },
-  { pattern: /punctuation/i, category: "punctuation", type: "punctuation" },
-];
+// Category display names for formatting
+const CATEGORY_LABELS: Record<ExplanationCategory, string> = {
+  article: "Article",
+  preposition: "Preposition",
+  tense: "Tense",
+  agreement: "Agreement",
+  word_order: "Word Order",
+  vocabulary: "Vocabulary",
+  spelling: "Spelling",
+  idiom: "Idiom",
+  formality: "Formality",
+  clarity: "Clarity",
+  redundancy: "Redundancy",
+  punctuation: "Punctuation",
+  capitalization: "Capitalization",
+  other: "Other",
+};
 
 interface ErrorAggregate {
-  category: string;
-  type: string;
+  category: ExplanationCategory;
   count: number;
   examples: Array<{
     original: string;
@@ -57,7 +52,7 @@ interface VocabularyInsight {
 interface AggregatedData {
   stats: ReviewStats;
   timeRange: TimeRange;
-  errorPatterns: Map<string, ErrorAggregate>;
+  errorPatterns: Map<ExplanationCategory, ErrorAggregate>;
   vocabularyInsights: VocabularyInsight[];
   dueForReview: PromptRecord[];
 }
@@ -68,44 +63,46 @@ interface AIInsights {
   progressNotes: string[];
 }
 
-// Categorize an error based on analysis_result text
-function categorizeError(analysisResult: string): { category: string; type: string } {
-  for (const { pattern, category, type } of ERROR_PATTERNS) {
-    if (pattern.test(analysisResult)) {
-      return { category, type };
+// Parse categories from JSON string stored in database
+function parseCategories(categoriesJson: string | null): ExplanationCategory[] {
+  if (!categoriesJson) return ["other"];
+  try {
+    const parsed = JSON.parse(categoriesJson);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed as ExplanationCategory[];
     }
+  } catch {
+    // Ignore parse errors
   }
-  return { category: "other", type: "unclassified" };
+  return ["other"];
 }
 
-// Aggregate error patterns from records
-function aggregateErrorPatterns(records: PromptRecord[]): Map<string, ErrorAggregate> {
-  const aggregated = new Map<string, ErrorAggregate>();
+// Aggregate error patterns from records using stored categories
+function aggregateErrorPatterns(records: PromptRecord[]): Map<ExplanationCategory, ErrorAggregate> {
+  const aggregated = new Map<ExplanationCategory, ErrorAggregate>();
 
   for (const record of records) {
-    if (!record.analysis_result) continue;
+    const categories = parseCategories(record.categories);
 
-    const { category, type } = categorizeError(record.analysis_result);
-    const key = `${category}:${type}`;
+    for (const category of categories) {
+      const existing = aggregated.get(category) || {
+        category,
+        count: 0,
+        examples: [],
+      };
 
-    const existing = aggregated.get(key) || {
-      category,
-      type,
-      count: 0,
-      examples: [],
-    };
+      existing.count++;
+      if (existing.examples.length < 3) {
+        existing.examples.push({
+          original: record.prompt,
+          corrected: record.correction,
+          explanation: record.analysis_result || "",
+          date: record.created_at,
+        });
+      }
 
-    existing.count++;
-    if (existing.examples.length < 3) {
-      existing.examples.push({
-        original: record.prompt,
-        corrected: record.correction,
-        explanation: record.analysis_result,
-        date: record.created_at,
-      });
+      aggregated.set(category, existing);
     }
-
-    aggregated.set(key, existing);
   }
 
   return aggregated;
@@ -191,11 +188,12 @@ function buildAIAnalysisPrompt(data: AggregatedData): string {
 
   const errorSummary = sortedErrors
     .map((e) => {
+      const label = CATEGORY_LABELS[e.category];
       const examples = e.examples
         .slice(0, 2)
         .map((ex) => `  - "${ex.original}" → "${ex.corrected}"`)
         .join("\n");
-      return `- ${e.category}/${e.type}: ${e.count} occurrences\n${examples}`;
+      return `- ${label}: ${e.count} occurrences\n${examples}`;
     })
     .join("\n");
 
@@ -333,7 +331,8 @@ export function formatReviewOutput(
 
     if (groupBy === "error_type") {
       for (const error of sortedErrors.slice(0, 5)) {
-        output += `#### ${capitalize(error.category)} - ${formatType(error.type)} (${error.count} occurrences)\n`;
+        const label = CATEGORY_LABELS[error.category];
+        output += `#### ${label} (${error.count} occurrences)\n`;
         output += `| Original | Corrected |\n`;
         output += `|----------|----------|\n`;
         for (const ex of error.examples.slice(0, 3)) {
@@ -355,14 +354,14 @@ export function formatReviewOutput(
       for (const [date, errors] of Array.from(byDate.entries()).slice(0, 5)) {
         output += `#### ${date}\n`;
         for (const error of errors.slice(0, 3)) {
-          output += `- ${error.category}/${error.type}: ${error.count} occurrences\n`;
+          output += `- ${CATEGORY_LABELS[error.category]}: ${error.count} occurrences\n`;
         }
         output += "\n";
       }
     } else if (groupBy === "project") {
       output += `(Project grouping requires more data - showing by error type)\n\n`;
       for (const error of sortedErrors.slice(0, 5)) {
-        output += `- ${capitalize(error.category)}/${formatType(error.type)}: ${error.count} occurrences\n`;
+        output += `- ${CATEGORY_LABELS[error.category]}: ${error.count} occurrences\n`;
       }
       output += "\n";
     }
@@ -397,14 +396,6 @@ export function formatReviewOutput(
 }
 
 // Helper functions
-function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-function formatType(type: string): string {
-  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + "...";

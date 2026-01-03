@@ -32,37 +32,52 @@ import {
   getSessionStats,
 } from "./session-cache.js";
 
+import type { AnalysisResult, AnalysisType, Explanation } from "./analyzer.js";
+import type { Mode } from "./validation.js";
+
 interface PromptResponse {
   success: boolean;
   mode?: string;
   skip?: boolean;
   autoCopyCorrections?: boolean;
-  correction?: {
-    hasCorrection: boolean;
-    correctedText: string | null;
-    alternative: string | null;
-    significant: boolean;
+  analysis?: {
+    type: AnalysisType;
+    text: string | null;
     explanation: string;
   };
   error?: string;
 }
 
-import type { AnalysisResult } from "./analyzer.js";
+// Format a single explanation
+function formatSingleExplanation(e: Explanation): string {
+  // Capitalize first letter of category for display
+  const cat = e.category.charAt(0).toUpperCase() + e.category.slice(1).replace("_", " ");
+  return `${cat}: ${e.detail}`;
+}
 
-function buildPromptResponse(result: AnalysisResult, mode: string, autoCopyCorrections: boolean): PromptResponse {
-  if (result.skip) {
+// Format explanations based on mode
+function formatExplanation(result: AnalysisResult, mode: Mode): string {
+  if (result.explanations.length === 0) return "";
+
+  if (mode === "block") {
+    return result.explanations.map((e) => `- ${formatSingleExplanation(e)}`).join("\n");
+  } else {
+    return formatSingleExplanation(result.explanations[0]);
+  }
+}
+
+function buildPromptResponse(result: AnalysisResult, mode: Mode, autoCopyCorrections: boolean): PromptResponse {
+  if (result.type === "skip") {
     return { success: true, mode, skip: true };
   }
   return {
     success: true,
     mode,
     autoCopyCorrections,
-    correction: {
-      hasCorrection: result.hasCorrection,
-      correctedText: result.correction,
-      alternative: result.alternative,
-      significant: result.significant,
-      explanation: result.explanation,
+    analysis: {
+      type: result.type,
+      text: result.text,
+      explanation: formatExplanation(result, mode),
     },
   };
 }
@@ -180,6 +195,7 @@ app.post(
         data.prompt,
         config.language,
         config.tone,
+        config.mode,
         recentPrompts
       );
       setInFlightRequest(sessionId, data.prompt, analysisPromise);
@@ -192,21 +208,28 @@ app.post(
       }
 
       // Cache the result and track in recent history
-      // Pass correction to addRecentPrompt so corrected text is tracked instead of original
+      // Pass corrected text to addRecentPrompt so corrected text is tracked instead of original
       cacheResult(sessionId, data.prompt, result);
-      addRecentPrompt(sessionId, data.prompt, result.correction);
+      const correctedText = result.type === "translation" || result.type === "correction" ? result.text : null;
+      addRecentPrompt(sessionId, data.prompt, correctedText);
 
-      // Save to DB if there's a correction OR an alternative
-      if (!result.skip && (result.hasCorrection || result.alternative)) {
+      // Save to DB if there's something worth saving (not skip)
+      if (result.type !== "skip") {
         setImmediate(() => {
           try {
+            const hasCorrection = result.type === "translation" || result.type === "correction" || result.type === "comment";
+            const correction = result.type === "translation" || result.type === "correction" ? result.text : null;
+            const alternative = result.type === "alternative" ? result.text : null;
+            const categories = result.explanations.map(e => e.category);
+
             insertPrompt({
               ...promptData,
               analyzed: true,
-              analysis_result: result.explanation,
-              has_correction: result.hasCorrection,
-              correction: result.correction,
-              alternative: result.alternative,
+              analysis_result: result.explanations.map(e => e.detail).join("; "),
+              has_correction: hasCorrection,
+              correction,
+              alternative,
+              categories,
             });
           } catch (error) {
             console.error("Failed to insert prompt:", error);

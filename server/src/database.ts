@@ -17,6 +17,7 @@ export interface PromptRecord {
   has_correction: boolean;
   correction: string | null;
   alternative: string | null;
+  categories: string | null;  // JSON array of category strings
   created_at: string;
   // Spaced repetition fields (migration v3)
   review_count: number;
@@ -69,6 +70,14 @@ const MIGRATIONS: Migration[] = [
       db.exec(`ALTER TABLE prompts ADD COLUMN next_review_at TEXT`);
       db.exec(`ALTER TABLE prompts ADD COLUMN ease_factor REAL DEFAULT 2.5`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_next_review ON prompts(next_review_at)`);
+    },
+  },
+  {
+    version: 4,
+    name: "add_categories_column",
+    up: (db) => {
+      db.exec(`ALTER TABLE prompts ADD COLUMN categories TEXT`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_categories ON prompts(categories)`);
     },
   },
 ];
@@ -142,11 +151,12 @@ export function insertPrompt(data: {
   has_correction?: boolean;
   correction?: string | null;
   alternative?: string | null;
+  categories?: string[];
 }): number {
   const database = getDb();
   const stmt = database.prepare(`
-    INSERT INTO prompts (prompt, timestamp, session_id, cwd, project_dir, analyzed, analysis_result, has_correction, correction, alternative)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prompts (prompt, timestamp, session_id, cwd, project_dir, analyzed, analysis_result, has_correction, correction, alternative, categories)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.prompt,
@@ -158,7 +168,8 @@ export function insertPrompt(data: {
     data.analysis_result ?? null,
     data.has_correction ? 1 : 0,
     data.correction ?? null,
-    data.alternative ?? null
+    data.alternative ?? null,
+    data.categories ? JSON.stringify(data.categories) : null
   );
   return result.lastInsertRowid as number;
 }

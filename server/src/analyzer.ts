@@ -2,29 +2,71 @@ import { getConfig } from "./config.js";
 import { insertPrompt } from "./database.js";
 import { queryClaudeAI, withRetry } from "./claude.js";
 
-import type { Tone } from "./validation.js";
+import type { Tone, Mode } from "./validation.js";
+
+export type AnalysisType = "skip" | "translation" | "correction" | "comment" | "alternative";
+
+export type ExplanationCategory =
+  // Grammar
+  | "article"       // a/an/the
+  | "preposition"   // in/on/at/to/for
+  | "tense"         // past/present/future/perfect
+  | "agreement"     // subject-verb, singular/plural
+  | "word_order"    // sentence structure
+  // Word choice
+  | "vocabulary"    // wrong word, better synonym
+  | "spelling"      // typos, misspellings
+  | "idiom"         // idiomatic expressions
+  // Style
+  | "formality"     // too casual/formal
+  | "clarity"       // ambiguous, unclear
+  | "redundancy"    // unnecessary words
+  // Punctuation/Formatting
+  | "punctuation"   // commas, periods
+  | "capitalization"
+  // Catch-all
+  | "other";
+
+const VALID_CATEGORIES: Set<string> = new Set([
+  "article", "preposition", "tense", "agreement", "word_order",
+  "vocabulary", "spelling", "idiom",
+  "formality", "clarity", "redundancy",
+  "punctuation", "capitalization", "other"
+]);
+
+export interface Explanation {
+  category: ExplanationCategory;
+  detail: string;
+}
 
 export interface AnalysisResult {
-  skip: boolean;
-  hasCorrection: boolean;
-  correction: string | null;
-  explanation: string;
-  alternative: string | null;
-  significant: boolean; // true if correction/alternative is significant (worth learning/blocking)
-  originalPrompt: string;
+  type: AnalysisType;
+  text: string | null;        // corrected/translated/alternative text
+  explanations: Explanation[];
+  sourceLang: string | null;  // preserved for translations
 }
 
-function getToneDescription(tone: Tone): string {
-  switch (tone) {
-    case "casual":
-      return "casual and friendly, like chatting with a colleague";
-    case "professional":
-      return "formal and professional, suitable for business communication";
-    case "balanced":
-    default:
-      return "neutral and clear, balancing friendliness with professionalism";
-  }
+// Raw explanation from Claude API
+interface RawExplanation {
+  category?: string;
+  detail?: string;
 }
+
+// Raw response from Claude API
+interface RawAnalysisResponse {
+  skip?: boolean;
+  sourceLang?: string;           // Present = translation
+  correction?: string;           // Present = correction/translation text
+  comment?: RawExplanation;      // Present = minor observation with category
+  alternative?: string;          // Present = alternative suggestion
+  explanations?: RawExplanation[];
+}
+
+const TONE_DESC: Record<Tone, string> = {
+  casual: "casual and friendly, like chatting with a colleague",
+  professional: "formal and professional, suitable for business communication",
+  balanced: "neutral and clear, balancing friendliness with professionalism",
+};
 
 function buildAnalysisPrompt(
   prompt: string,
@@ -32,80 +74,106 @@ function buildAnalysisPrompt(
   tone: Tone,
   recentPrompts: string[] = []
 ): string {
-  const toneDesc = getToneDescription(tone);
-
-  // Build recent prompts context section
   let recentContext = "";
   if (recentPrompts.length > 0) {
     recentContext = `
-RECENT CONTEXT (previous prompts from this session, for context only - do not analyze these):
+Recent prompts from this session (for context - avoid suggesting similar alternatives):
 ${recentPrompts.map((p, i) => `${i + 1}. "${p}"`).join("\n")}
-
-Use this context to:
-- Understand the conversation flow
-- Avoid suggesting alternatives that were already used in recent prompts
-- Recognize when the user is intentionally varying their language
 `;
   }
 
-  return `You are a language learning assistant. Analyze the following text that a user wrote while using Claude Code.
-
-The user is learning ${targetLang}. Feedback should be ${toneDesc}.
+  return `You are a language learning assistant. Analyze the following text written by a user learning ${targetLang}.
+Feedback tone: ${TONE_DESC[tone]}.
 ${recentContext}
 Text to analyze:
 """
 ${prompt}
 """
 
-FIRST, check the language of the text:
-1. If the text contains ANY non-${targetLang} language (Korean, Japanese, Chinese, Spanish, etc.):
-   - Translate it to ${targetLang}
-   - Keep code snippets, file paths, technical identifiers, URLs, and command-line instructions intact (do not translate them)
-   - Return: {"hasCorrection": true, "correction": "<translation in ${targetLang}>", "alternative": null, "significant": true, "explanation": "- Translated from [detected language]"}
+Respond with JSON only. Use one of these formats:
 
-THEN, check if this should be skipped:
-- Simple confirmations in ${targetLang}: "yes", "no", "ok", "sure", "go ahead", "continue", "do it", "proceed"
-- Brief commands in ${targetLang}: "stop", "cancel", "abort", "retry", "next", "done", "run it", "fix it"
-- Acknowledgments in ${targetLang}: "thanks", "thank you", "got it", "understood", "makes sense"
-- Affirmations in ${targetLang}: "lgtm", "ship it", "sounds good", "perfect", "great", "nice"
-- Copied code, file paths, or technical identifiers
-- Command-line instructions or shell commands
-- Copied error messages or log output
-- URLs, JSON, or structured data
+1. SKIP - For simple confirmations, commands, code, URLs, or technical content:
+   {"skip": true}
 
-If any skip condition matches, respond with:
-{"skip": true}
+2. TRANSLATION - If text contains non-${targetLang} language:
+   {"sourceLang": "<detected language>", "correction": "<translated text>"}
 
-OTHERWISE, analyze the ${targetLang} text:
-- Keep code snippets, file paths, technical identifiers, URLs, and command-line instructions intact in corrections/alternatives
+3. CORRECTION - If text has significant grammar errors, wrong word usage, or unnatural expressions:
+   {"correction": "<corrected text>", "explanations": [{"category": "<cat>", "detail": "<desc>"}, ...]}
 
-2. If the text has issues (wrong grammar, unnatural expressions, typos):
-   - Ignore formatting issues: missing/extra spaces, line breaks, indentation, punctuation spacing
-   - Ignore minor issues like missing capitalization or missing commas/periods (acceptable in casual coding communication)
-   - Set "significant": true for grammar errors, wrong word usage, or unnatural expressions that affect meaning
-   - Set "significant": false for minor typos or small mistakes that don't affect understanding
-   - Return: {"hasCorrection": true, "correction": "<corrected version>", "alternative": null, "significant": <true or false>, "explanation": "<single-line explanation in 'Title: description' format, where Title is capitalized 1-3 words like 'Article', 'Tense', 'Word choice', 'Unnatural'>"}
-   - Explanation MUST be a single line describing what was corrected - NO bullet points, general advice, context, or commentary
+4. COMMENT - For minor typos or small observations that don't warrant a full correction:
+   {"comment": {"category": "<cat>", "detail": "<desc>"}}
 
-3. If the text is correct and natural, suggest an alternative way to express the same idea:
-   - Set "significant": true ONLY if the alternative is significantly more natural, idiomatic, or better than the original (worth learning)
-   - Set "significant": false if the alternative is just a minor variation with similar quality
-   - Do NOT suggest alternatives that match or are very similar to any of the recent prompts shown above
-   - Return: {"hasCorrection": false, "correction": null, "alternative": "<alternative expression>", "significant": <true or false>, "explanation": "<single-line note on nuance in 'Title: description' format, where Title is capitalized 1-3 words like 'Tone', 'Nuance', 'Formality', 'Idiom'>"}
-   - Explanation MUST be a single line describing nuance/tone differences - NO bullet points, general advice, context, or commentary
+5. ALTERNATIVE - If text is correct and natural, suggest a significantly better way to express it:
+   {"alternative": "<alternative expression>"}
+   Only suggest if it's a meaningful improvement. Skip if it's just a minor variation.
 
-Respond ONLY with valid JSON, no other text.`;
+Categories for "category" field (use exactly one):
+- article: a/an/the usage
+- preposition: in/on/at/to/for etc.
+- tense: past/present/future/perfect
+- agreement: subject-verb, singular/plural
+- word_order: sentence structure
+- vocabulary: wrong word, better synonym
+- spelling: typos, misspellings
+- idiom: idiomatic expressions
+- formality: too casual/formal
+- clarity: ambiguous, unclear
+- redundancy: unnecessary words
+- punctuation: commas, periods
+- capitalization: proper nouns, sentence start
+- other: anything not fitting above
+
+Rules:
+- Keep code snippets, file paths, URLs, and technical identifiers intact
+- Ignore minor formatting issues (spacing, capitalization, punctuation)`;
+}
+
+// Determine analysis type from raw response
+function inferType(raw: RawAnalysisResponse): AnalysisType {
+  if (raw.skip) return "skip";
+  if (raw.sourceLang) return "translation";
+  if (raw.correction) return "correction";
+  if (raw.comment) return "comment";
+  if (raw.alternative) return "alternative";
+  return "skip"; // fallback
+}
+
+// Validate and normalize a category string
+function normalizeCategory(cat: string | undefined): ExplanationCategory {
+  if (cat && VALID_CATEGORIES.has(cat)) {
+    return cat as ExplanationCategory;
+  }
+  return "other";
+}
+
+// Parse raw explanation into validated Explanation
+function parseExplanation(raw: RawExplanation | undefined): Explanation | null {
+  if (!raw || !raw.detail) return null;
+  return {
+    category: normalizeCategory(raw.category),
+    detail: raw.detail,
+  };
+}
+
+// Parse array of raw explanations
+function parseExplanations(raw: RawExplanation[] | undefined): Explanation[] {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw
+    .map(parseExplanation)
+    .filter((e): e is Explanation => e !== null);
 }
 
 async function executeAnalysis(
   prompt: string,
   targetLang: string,
   tone: Tone,
+  mode: Mode,
   recentPrompts: string[] = []
 ): Promise<AnalysisResult> {
   const config = getConfig();
 
-  console.debug(`Analyzing prompt (${prompt.length} chars, model: ${config.model}, context: ${recentPrompts.length} recent)`);
+  console.debug(`Analyzing prompt (${prompt.length} chars, model: ${config.model}, mode: ${mode}, context: ${recentPrompts.length} recent)`);
 
   const analysisPrompt = buildAnalysisPrompt(prompt, targetLang, tone, recentPrompts);
   const startTime = Date.now();
@@ -120,35 +188,42 @@ async function executeAnalysis(
   try {
     const jsonMatch = resultText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]) as Partial<AnalysisResult> & { skip?: boolean };
+      const raw = JSON.parse(jsonMatch[0]) as RawAnalysisResponse;
+      const type = inferType(raw);
 
-      // Handle skip response
-      if (parsed.skip) {
-        console.debug(`Analysis (${duration}ms): skip=true`);
-        return {
-          skip: true,
-          hasCorrection: false,
-          correction: null,
-          explanation: "",
-          alternative: null,
-          significant: false,
-          originalPrompt: prompt,
-        };
+      // Determine text and explanations based on type
+      let text: string | null = null;
+      let explanations: Explanation[] = [];
+
+      switch (type) {
+        case "skip":
+          break;
+        case "translation":
+          text = raw.correction ?? null;
+          explanations = [{ category: "other", detail: `Translated from ${raw.sourceLang}` }];
+          break;
+        case "correction":
+          text = raw.correction ?? null;
+          explanations = parseExplanations(raw.explanations);
+          break;
+        case "comment": {
+          const parsed = parseExplanation(raw.comment);
+          explanations = parsed ? [parsed] : [];
+          break;
+        }
+        case "alternative":
+          text = raw.alternative ?? null;
+          break;
       }
 
-      const result = {
-        skip: false,
-        hasCorrection: parsed.hasCorrection ?? false,
-        correction: parsed.correction ?? null,
-        explanation: parsed.explanation ?? "",
-        alternative: parsed.alternative ?? null,
-        significant: parsed.significant ?? false,
-        originalPrompt: prompt,
+      const result: AnalysisResult = {
+        type,
+        text,
+        explanations,
+        sourceLang: raw.sourceLang ?? null,
       };
 
-      console.debug(
-        `Analysis (${duration}ms): hasCorrection=${result.hasCorrection} significant=${result.significant} alternative=${result.alternative ? 'yes' : 'no'}`
-      );
+      console.debug(`Analysis (${duration}ms): type=${type} text=${text ? 'yes' : 'no'}`);
 
       return result;
     }
@@ -156,15 +231,12 @@ async function executeAnalysis(
     console.warn(`Analysis (${duration}ms): JSON parse failed:`, error instanceof Error ? error.message : error);
   }
 
-  console.debug(`Analysis (${duration}ms): parse failed, returning default result`);
+  console.debug(`Analysis (${duration}ms): parse failed, returning default`);
   return {
-    skip: false,
-    hasCorrection: false,
-    correction: null,
-    explanation: "Failed to analyze the text.",
-    alternative: null,
-    significant: false,
-    originalPrompt: prompt,
+    type: "skip",
+    text: null,
+    explanations: [],
+    sourceLang: null,
   };
 }
 
@@ -172,9 +244,10 @@ export async function analyzePrompt(
   prompt: string,
   targetLang: string,
   tone: Tone,
+  mode: Mode,
   recentPrompts: string[] = []
 ): Promise<AnalysisResult> {
-  return withRetry(() => executeAnalysis(prompt, targetLang, tone, recentPrompts), {
+  return withRetry(() => executeAnalysis(prompt, targetLang, tone, mode, recentPrompts), {
     maxRetries: 2,
     baseDelayMs: 500,
   });
@@ -230,11 +303,17 @@ async function processQueue(): Promise<void> {
         const result = await analyzePrompt(
           record.prompt,
           config.language,
-          config.tone
+          config.tone,
+          config.mode
         );
 
-        // Save to DB if there's a correction OR an alternative
-        if (!result.skip && (result.hasCorrection || result.alternative)) {
+        // Save to DB if there's something worth saving (not skip)
+        if (result.type !== "skip") {
+          const hasCorrection = result.type === "translation" || result.type === "correction" || result.type === "comment";
+          const correction = result.type === "translation" || result.type === "correction" ? result.text : null;
+          const alternative = result.type === "alternative" ? result.text : null;
+          const categories = result.explanations.map(e => e.category);
+
           insertPrompt({
             prompt: record.prompt,
             timestamp: record.timestamp,
@@ -242,10 +321,11 @@ async function processQueue(): Promise<void> {
             cwd: record.cwd,
             project_dir: record.project_dir,
             analyzed: true,
-            analysis_result: result.explanation,
-            has_correction: result.hasCorrection,
-            correction: result.correction,
-            alternative: result.alternative,
+            analysis_result: result.explanations.map(e => e.detail).join("; "),
+            has_correction: hasCorrection,
+            correction,
+            alternative,
+            categories,
           });
         }
       } catch (error) {

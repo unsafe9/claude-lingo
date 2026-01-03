@@ -55,7 +55,7 @@ export async function queryClaudeAI(prompt: string, options: QueryOptions = {}):
     maxTurns: 1,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    systemPrompt: options.systemPrompt || "You are a helpful assistant. Respond only with valid JSON.",
+    systemPrompt: options.systemPrompt || "You are a helpful assistant for a language tutoring Claude Code plugin 'lingo'. Respond only with valid JSON.",
   };
 
   if (executablePath) {

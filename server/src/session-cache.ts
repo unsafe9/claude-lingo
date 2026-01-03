@@ -87,18 +87,16 @@ export function cacheResult(sessionId: string, prompt: string, result: AnalysisR
     timestamp: now,
   });
 
-  // If there's a correction, cache the corrected text as "skip" so it won't be analyzed again
-  if (result.hasCorrection && result.correction) {
+  // If there's a correction/translation, cache the corrected text as "skip" so it won't be analyzed again
+  const hasCorrection = result.type === "translation" || result.type === "correction";
+  if (hasCorrection && result.text) {
     const skipResult: AnalysisResult = {
-      skip: true,
-      hasCorrection: false,
-      correction: null,
-      explanation: "",
-      alternative: null,
-      significant: false,
-      originalPrompt: result.correction,
+      type: "skip",
+      text: null,
+      explanations: [],
+      sourceLang: null,
     };
-    session.cache.set(result.correction, {
+    session.cache.set(result.text, {
       result: skipResult,
       timestamp: now,
     });

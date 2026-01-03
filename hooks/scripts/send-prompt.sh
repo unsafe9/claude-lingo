@@ -69,12 +69,10 @@ if [ "$mode" = "silent" ] || [ "$is_skipped" = "true" ]; then
   exit 0
 fi
 
-# Extract correction data
-has_correction=$(echo "$response" | jq -r '.correction.hasCorrection // false')
-corrected_text=$(echo "$response" | jq -r '.correction.correctedText // empty')
-explanation=$(echo "$response" | jq -r '.correction.explanation // empty')
-alternative=$(echo "$response" | jq -r '.correction.alternative // empty')
-significant=$(echo "$response" | jq -r '.correction.significant // false')
+# Extract analysis data
+analysis_type=$(echo "$response" | jq -r '.analysis.type // "skip"')
+analysis_text=$(echo "$response" | jq -r '.analysis.text // empty')
+explanation=$(echo "$response" | jq -r '.analysis.explanation // empty')
 auto_copy=$(echo "$response" | jq -r '.autoCopyCorrections // false')
 
 # Copy to clipboard helper (macOS: pbcopy, Linux: xclip)
@@ -87,82 +85,87 @@ copy_to_clipboard() {
   fi
 }
 
-# Handle corrections
-if [ "$has_correction" = "true" ]; then
-  # Check if this is a translation (explanation contains "Translated from")
-  is_translation=false
-  if echo "$explanation" | grep -qi "Translated from"; then
-    is_translation=true
-  fi
+# Handle based on analysis type
+case "$analysis_type" in
+  "translation")
+    # Copy to clipboard if enabled
+    if [ "$auto_copy" = "true" ] && [ -n "$analysis_text" ]; then
+      copy_to_clipboard "$analysis_text"
+    fi
 
-  # Copy to clipboard if enabled
-  if [ "$auto_copy" = "true" ]; then
-    copy_to_clipboard "$corrected_text"
-  fi
-
-  if [ "$mode" = "block" ] && [ "$significant" = "true" ]; then
-    # Block mode with significant correction: block the prompt
-    if [ "$is_translation" = "true" ]; then
-      # For translations: just show title and translated text
+    if [ "$mode" = "block" ]; then
+      # Block mode: block the prompt with translation
       jq -n \
-        --arg corrected "$corrected_text" \
+        --arg text "$analysis_text" \
         '{
           "decision": "block",
-          "reason": ("🌐 Lingo Translation\n\n" + $corrected)
+          "reason": ("🌐 Lingo Translation\n\n" + $text)
         }'
     else
+      # Non-block mode: show translation in systemMessage
       jq -n \
-        --arg corrected "$corrected_text" \
-        --arg explanation "$explanation" \
+        --arg text "$analysis_text" \
         '{
-          "decision": "block",
-          "reason": ("📝 Lingo Correction\n\n" + $explanation + "\n\nImproved prompt: " + $corrected)
+          "continue": true,
+          "systemMessage": ("🌐 Lingo Translation: " + $text)
         }'
     fi
     exit 0
-  else
-    # Non-block mode or minor correction: show via systemMessage and continue
-    if [ "$is_translation" = "true" ]; then
-      # Translation: single line with translated text
+    ;;
+
+  "correction")
+    # Copy to clipboard if enabled
+    if [ "$auto_copy" = "true" ] && [ -n "$analysis_text" ]; then
+      copy_to_clipboard "$analysis_text"
+    fi
+
+    if [ "$mode" = "block" ]; then
+      # Block mode: block the prompt with correction
       jq -n \
-        --arg corrected "$corrected_text" \
+        --arg text "$analysis_text" \
+        --arg explanation "$explanation" \
         '{
-          "continue": true,
-          "systemMessage": ("🌐 " + $corrected)
+          "decision": "block",
+          "reason": ("📝 Lingo Correction\n\n" + $explanation + "\n\nImproved prompt: " + $text)
         }'
-    elif [ "$significant" = "true" ]; then
-      # Significant correction: corrected text in systemMessage, explanation to stderr (verbose mode)
-      echo "📝 Correction:" >&2
+    else
+      # Non-block mode: show correction in systemMessage, explanation to stderr
+      echo "📝 Lingo Correction:" >&2
       echo "$explanation" >&2
       jq -n \
-        --arg corrected "$corrected_text" \
+        --arg text "$analysis_text" \
         '{
           "continue": true,
-          "systemMessage": ("📝 " + $corrected)
-        }'
-    else
-      # Minor fix: single line with explanation only (no corrected text)
-      jq -n \
-        --arg explanation "$explanation" \
-        '{
-          "continue": true,
-          "systemMessage": ("📝 " + $explanation)
+          "systemMessage": ("📝 Lingo Correction: " + $text)
         }'
     fi
     exit 0
-  fi
-elif [ -n "$alternative" ] && [ "$alternative" != "null" ]; then
-  # Alternative: alternative in systemMessage, explanation to stderr (verbose mode)
-  echo "💬 Alternative:" >&2
-  echo "$explanation" >&2
-  jq -n \
-    --arg alternative "$alternative" \
-    '{
-      "continue": true,
-      "systemMessage": ("💬 " + $alternative)
-    }'
-  exit 0
-fi
+    ;;
+
+  "comment")
+    # Comment (minor observation): show explanation only, no text to copy
+    jq -n \
+      --arg explanation "$explanation" \
+      '{
+        "continue": true,
+        "systemMessage": ("📝 Lingo Comment: " + $explanation)
+      }'
+    exit 0
+    ;;
+
+  "alternative")
+    # Alternative suggestion
+    echo "💬 Lingo Alternative:" >&2
+    echo "$explanation" >&2
+    jq -n \
+      --arg text "$analysis_text" \
+      '{
+        "continue": true,
+        "systemMessage": ("💬 Lingo Alternative: " + $text)
+      }'
+    exit 0
+    ;;
+esac
 
 echo "$CONTINUE_RESPONSE"
 exit 0
