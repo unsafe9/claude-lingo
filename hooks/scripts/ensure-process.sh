@@ -4,6 +4,7 @@ set -euo pipefail
 PROCESS_NAME="lingo"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "$SCRIPT_DIR/../../server" && pwd)"
+echo "DEBUG: SCRIPT_DIR=$SCRIPT_DIR" >&2
 ECOSYSTEM_FILE="$SERVER_DIR/ecosystem.config.cjs"
 ENDPOINT="http://localhost:41765/health"
 
