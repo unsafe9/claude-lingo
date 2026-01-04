@@ -89,12 +89,15 @@ else
   fi
 fi
 
-sleep 0.5
-if curl -s --max-time 2 "$ENDPOINT" > /dev/null 2>&1; then
-  save_running_version "$SERVER_VERSION"
-  echo "▶️ Lingo v$SERVER_VERSION started." >&2
-  exit 3
-fi
+# Wait for server to become healthy (up to 5 seconds)
+for i in {1..10}; do
+  sleep 0.5
+  if curl -s --max-time 2 "$ENDPOINT" > /dev/null 2>&1; then
+    save_running_version "$SERVER_VERSION"
+    echo "▶️ Lingo v$SERVER_VERSION started." >&2
+    exit 3
+  fi
+done
 
 echo "⚠️ Lingo background process is not running." >&2
 exit 3
