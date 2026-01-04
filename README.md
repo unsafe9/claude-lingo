@@ -68,11 +68,12 @@ Same immediate analysis as non-block (1-3 seconds delay), but corrections and tr
   ```
 - **Alternative/Comment:** Same as non-block (non-blocking)
 
-## Setup
+## Installation
 
-```bash
-cd server
-bun install
+Install from the Claude Code marketplace:
+```
+/plugin marketplace add unsafe9/my-terminal
+/plugin install lingo
 ```
 
 The server starts automatically via pm2 when you open Claude Code.
