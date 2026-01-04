@@ -144,7 +144,6 @@ app.post(
       prompt: data.prompt,
       timestamp: data.timestamp || new Date().toISOString(),
       session_id: sessionId,
-      cwd: data.cwd || "",
       project_dir: data.project_dir || "",
     };
 
@@ -208,7 +207,6 @@ app.post(
 
             insertPrompt({
               ...promptData,
-              analyzed: true,
               analysis_result: result.explanations.map(e => e.detail).join("; "),
               has_correction: hasCorrection,
               correction,

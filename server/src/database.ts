@@ -8,17 +8,15 @@ export type { TimeRange } from "./validation.js";
 export interface PromptRecord {
   id: number;
   prompt: string;
-  timestamp: string;
   session_id: string;
-  cwd: string;
-  project_dir: string;
-  analyzed: boolean;
+  project_dir: string | null;
+  timestamp: string;
   analysis_result: string | null;
   has_correction: boolean;
   correction: string | null;
   alternative: string | null;
   created_at: string;
-  // Spaced repetition fields (migration v3)
+  // Spaced repetition fields
   review_count: number;
   next_review_at: string | null;
   ease_factor: number;
@@ -39,11 +37,9 @@ const MIGRATIONS: Migration[] = [
         CREATE TABLE IF NOT EXISTS prompts (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           prompt TEXT NOT NULL,
-          timestamp TEXT NOT NULL,
           session_id TEXT NOT NULL,
-          cwd TEXT,
           project_dir TEXT,
-          analyzed INTEGER DEFAULT 0,
+          timestamp TEXT NOT NULL,
           analysis_result TEXT,
           has_correction INTEGER DEFAULT 0,
           correction TEXT,
@@ -55,8 +51,9 @@ const MIGRATIONS: Migration[] = [
         )
       `);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id)`);
-      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_analyzed ON prompts(analyzed)`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_next_review ON prompts(next_review_at)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_created_at ON prompts(created_at)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_prompts_has_correction ON prompts(has_correction)`);
 
       db.exec(`
         CREATE TABLE IF NOT EXISTS prompt_categories (
@@ -130,11 +127,9 @@ function getDb(): Database {
 
 export function insertPrompt(data: {
   prompt: string;
-  timestamp: string;
   session_id: string;
-  cwd: string;
-  project_dir: string;
-  analyzed?: boolean;
+  project_dir?: string;
+  timestamp: string;
   analysis_result?: string;
   has_correction?: boolean;
   correction?: string | null;
@@ -143,18 +138,15 @@ export function insertPrompt(data: {
 }): number {
   const database = getDb();
 
-  // Insert prompt
   const stmt = database.prepare(`
-    INSERT INTO prompts (prompt, timestamp, session_id, cwd, project_dir, analyzed, analysis_result, has_correction, correction, alternative)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO prompts (prompt, session_id, project_dir, timestamp, analysis_result, has_correction, correction, alternative)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.prompt,
-    data.timestamp,
     data.session_id,
-    data.cwd,
-    data.project_dir,
-    data.analyzed ? 1 : 0,
+    data.project_dir ?? null,
+    data.timestamp,
     data.analysis_result ?? null,
     data.has_correction ? 1 : 0,
     data.correction ?? null,

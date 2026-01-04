@@ -272,7 +272,6 @@ interface QueuedPrompt {
   prompt: string;
   timestamp: string;
   session_id: string;
-  cwd: string;
   project_dir: string;
 }
 
@@ -332,9 +331,7 @@ async function processQueue(): Promise<void> {
             prompt: record.prompt,
             timestamp: record.timestamp,
             session_id: record.session_id,
-            cwd: record.cwd,
             project_dir: record.project_dir,
-            analyzed: true,
             analysis_result: result.explanations.map(e => e.detail).join("; "),
             has_correction: hasCorrection,
             correction,

@@ -38,7 +38,6 @@ export const PromptRequestSchema = z.object({
   prompt: z.string().min(1, "Prompt is required"),
   timestamp: z.string().optional(),
   session_id: z.string().optional(),
-  cwd: z.string().optional(),
   project_dir: z.string().optional(),
 });
 
