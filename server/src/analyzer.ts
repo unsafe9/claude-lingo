@@ -39,6 +39,7 @@ export interface AnalysisResult {
   type: AnalysisType;
   text: string | null;        // corrected/translated/alternative text
   explanations: Explanation[];
+  summary: string | null;     // single comprehensive sentence for non-block mode
   sourceLang: string | null;  // preserved for translations
 }
 
@@ -55,6 +56,8 @@ interface RawAnalysisResponse {
   correction?: string;           // Present = correction/translation text
   comment?: RawExplanation;      // Present = minor observation with category
   alternative?: string;          // Present = alternative suggestion
+  reason?: string;               // Explanation for alternative
+  summary?: string;              // Comprehensive single-sentence explanation
   explanations?: RawExplanation[];
 }
 
@@ -95,13 +98,17 @@ Respond with JSON only. Use one of these formats:
    {"sourceLang": "<detected language>", "correction": "<translated text>"}
 
 3. CORRECTION - If text has significant grammar errors, wrong word usage, or unnatural expressions:
-   {"correction": "<corrected text>", "explanations": [{"category": "<cat>", "detail": "<desc>"}, ...]}
+   {"correction": "<corrected text>", "summary": "<tip>", "explanations": [{"category": "<cat>", "detail": "<tip>"}, ...]}
+   - "summary": A single comprehensive sentence covering all issues (e.g., "Use past tense 'went' and add the article 'the' before 'store'.").
+   - "detail": A complete sentence for each individual issue (e.g., "Use past tense 'went' for actions that happened yesterday.").
 
 4. COMMENT - For minor typos or small observations that don't warrant a full correction:
-   {"comment": {"category": "<cat>", "detail": "<desc>"}}
+   {"comment": {"category": "<cat>", "detail": "<tip>"}}
+   The "detail" should be a complete sentence like a tutor tip.
 
 5. ALTERNATIVE - If text is correct and natural, suggest a significantly better way to express it:
-   {"alternative": "<alternative expression>"}
+   {"alternative": "<alternative expression>", "reason": "<tip>"}
+   The "reason" should be a complete sentence explaining why this is better (e.g., "This phrasing sounds more natural in casual conversation.").
    Only suggest if it's a meaningful improvement. Skip if it's just a minor variation.
 
 Categories for "category" field (use exactly one of these identifiers):
@@ -188,9 +195,10 @@ async function executeAnalysis(
       const raw = JSON.parse(jsonMatch[0]) as RawAnalysisResponse;
       const type = inferType(raw);
 
-      // Determine text and explanations based on type
+      // Determine text, explanations, and summary based on type
       let text: string | null = null;
       let explanations: Explanation[] = [];
+      let summary: string | null = null;
 
       switch (type) {
         case "skip":
@@ -202,14 +210,21 @@ async function executeAnalysis(
         case "correction":
           text = raw.correction ?? null;
           explanations = parseExplanations(raw.explanations);
+          summary = raw.summary ?? null;
           break;
         case "comment": {
           const parsed = parseExplanation(raw.comment);
           explanations = parsed ? [parsed] : [];
+          // Use detail as summary for comments
+          summary = parsed?.detail ?? null;
           break;
         }
         case "alternative":
           text = raw.alternative ?? null;
+          if (raw.reason) {
+            explanations = [{ category: "other", detail: raw.reason }];
+            summary = raw.reason;
+          }
           break;
       }
 
@@ -217,6 +232,7 @@ async function executeAnalysis(
         type,
         text,
         explanations,
+        summary,
         sourceLang: raw.sourceLang ?? null,
       };
 
@@ -233,6 +249,7 @@ async function executeAnalysis(
     type: "skip",
     text: null,
     explanations: [],
+    summary: null,
     sourceLang: null,
   };
 }

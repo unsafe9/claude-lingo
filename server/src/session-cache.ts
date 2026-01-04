@@ -94,6 +94,7 @@ export function cacheResult(sessionId: string, prompt: string, result: AnalysisR
       type: "skip",
       text: null,
       explanations: [],
+      summary: null,
       sourceLang: null,
     };
     session.cache.set(result.text, {

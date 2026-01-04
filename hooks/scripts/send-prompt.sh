@@ -74,34 +74,19 @@ analysis_type=$(echo "$response" | jq -r '.analysis.type // "skip"')
 analysis_text=$(echo "$response" | jq -r '.analysis.text // empty')
 auto_copy=$(echo "$response" | jq -r '.autoCopyCorrections // false')
 
-# Format explanations array using jq
-# Each explanation has {category, detail} - format as "Category: detail"
-# - Single: no bullet
-# - Multiple in block mode: bullets
-# - Multiple in non-block: first only
-explanations_count=$(echo "$response" | jq '.analysis.explanations | length // 0')
-
-if [ "$explanations_count" -eq 0 ]; then
-  explanation=""
-elif [ "$explanations_count" -eq 1 ]; then
-  # Single explanation: no bullet
-  explanation=$(echo "$response" | jq -r '
-    .analysis.explanations[0] |
-    (.category | gsub("_"; " ") | .[0:1] | ascii_upcase) + (.category | gsub("_"; " ") | .[1:]) + ": " + .detail
-  ')
-elif [ "$mode" = "block" ]; then
-  # Multiple explanations in block mode: use bullets
+# Format explanation based on mode
+# - Non-block: use summary (comprehensive single sentence)
+# - Block: "- Category: detail" bullets for all explanations
+if [ "$mode" = "block" ]; then
+  # Block mode: use bullets with "Category: detail" format
   explanation=$(echo "$response" | jq -r '
     .analysis.explanations | map(
       "- " + ((.category | gsub("_"; " ") | .[0:1] | ascii_upcase) + (.category | gsub("_"; " ") | .[1:])) + ": " + .detail
     ) | join("\n")
   ')
 else
-  # Multiple explanations in non-block mode: first only
-  explanation=$(echo "$response" | jq -r '
-    .analysis.explanations[0] |
-    (.category | gsub("_"; " ") | .[0:1] | ascii_upcase) + (.category | gsub("_"; " ") | .[1:]) + ": " + .detail
-  ')
+  # Non-block mode: use summary (comprehensive single sentence)
+  explanation=$(echo "$response" | jq -r '.analysis.summary // empty')
 fi
 
 # Copy to clipboard helper (macOS: pbcopy, Linux: xclip)

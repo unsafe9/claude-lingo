@@ -44,6 +44,7 @@ interface PromptResponse {
     type: AnalysisType;
     text: string | null;
     explanations: Explanation[];
+    summary: string | null;
   };
   error?: string;
 }
@@ -60,6 +61,7 @@ function buildPromptResponse(result: AnalysisResult, mode: Mode, autoCopyCorrect
       type: result.type,
       text: result.text,
       explanations: result.explanations,
+      summary: result.summary,
     },
   };
 }
