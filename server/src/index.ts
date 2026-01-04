@@ -43,27 +43,9 @@ interface PromptResponse {
   analysis?: {
     type: AnalysisType;
     text: string | null;
-    explanation: string;
+    explanations: Explanation[];
   };
   error?: string;
-}
-
-// Format a single explanation
-function formatSingleExplanation(e: Explanation): string {
-  // Capitalize first letter of category for display
-  const cat = e.category.charAt(0).toUpperCase() + e.category.slice(1).replace("_", " ");
-  return `${cat}: ${e.detail}`;
-}
-
-// Format explanations based on mode
-function formatExplanation(result: AnalysisResult, mode: Mode): string {
-  if (result.explanations.length === 0) return "";
-
-  if (mode === "block") {
-    return result.explanations.map((e) => `- ${formatSingleExplanation(e)}`).join("\n");
-  } else {
-    return formatSingleExplanation(result.explanations[0]);
-  }
 }
 
 function buildPromptResponse(result: AnalysisResult, mode: Mode, autoCopyCorrections: boolean): PromptResponse {
@@ -77,7 +59,7 @@ function buildPromptResponse(result: AnalysisResult, mode: Mode, autoCopyCorrect
     analysis: {
       type: result.type,
       text: result.text,
-      explanation: formatExplanation(result, mode),
+      explanations: result.explanations,
     },
   };
 }

@@ -27,8 +27,6 @@ const CATEGORY_LABELS: Record<ExplanationCategory, string> = {
   formality: "Formality",
   clarity: "Clarity",
   redundancy: "Redundancy",
-  punctuation: "Punctuation",
-  capitalization: "Capitalization",
   other: "Other",
 };
 

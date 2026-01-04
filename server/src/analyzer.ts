@@ -21,17 +21,13 @@ export type ExplanationCategory =
   | "formality"     // too casual/formal
   | "clarity"       // ambiguous, unclear
   | "redundancy"    // unnecessary words
-  // Punctuation/Formatting
-  | "punctuation"   // commas, periods
-  | "capitalization"
   // Catch-all
   | "other";
 
 const VALID_CATEGORIES: Set<string> = new Set([
   "article", "preposition", "tense", "agreement", "word_order",
   "vocabulary", "spelling", "idiom",
-  "formality", "clarity", "redundancy",
-  "punctuation", "capitalization", "other"
+  "formality", "clarity", "redundancy", "other"
 ]);
 
 export interface Explanation {
@@ -108,7 +104,7 @@ Respond with JSON only. Use one of these formats:
    {"alternative": "<alternative expression>"}
    Only suggest if it's a meaningful improvement. Skip if it's just a minor variation.
 
-Categories for "category" field (use exactly one):
+Categories for "category" field (use exactly one of these identifiers):
 - article: a/an/the usage
 - preposition: in/on/at/to/for etc.
 - tense: past/present/future/perfect
@@ -120,13 +116,14 @@ Categories for "category" field (use exactly one):
 - formality: too casual/formal
 - clarity: ambiguous, unclear
 - redundancy: unnecessary words
-- punctuation: commas, periods
-- capitalization: proper nouns, sentence start
 - other: anything not fitting above
+
+IMPORTANT - Category identifiers must be lowercase with underscores (e.g., "word_order", not "Word order").
 
 Rules:
 - Keep code snippets, file paths, URLs, and technical identifiers intact
-- Ignore minor formatting issues (spacing, capitalization, punctuation)`;
+- SKIP formatting issues entirely: capitalization, punctuation, spacing. These are not worth correcting.
+- Focus only on grammar errors, vocabulary issues, and unnatural expressions that affect comprehension or fluency`;
 }
 
 // Determine analysis type from raw response
