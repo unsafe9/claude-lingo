@@ -80,7 +80,9 @@
 # These block window creation - use for short tasks only.
 # Use "<global>" to inherit from global config.
 # Set to empty list to disable: `post_create: []`
-# post_create:
+post_create:
+  - "<global>"
+  - cd server && bun install
 
 # Commands to run before merging (e.g., linting, tests).
 # Aborts the merge if any command fails.
@@ -93,8 +95,8 @@
 #   - WM_HANDLE: The worktree handle/window name
 pre_merge:
   - "<global>"
-  - bun run typecheck
-  - bunx tsc --noEmit
+  - cd server && bun run typecheck
+  - cd server && bunx tsc --noEmit
 
 # Commands to run before worktree removal (during merge or remove).
 # Useful for backing up gitignored files before cleanup.
