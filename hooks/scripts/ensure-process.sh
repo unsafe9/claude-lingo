@@ -2,27 +2,18 @@
 set -euo pipefail
 
 PROCESS_NAME="lingo"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_DIR="$(cd "$SCRIPT_DIR/../../server" && pwd)"
-echo "DEBUG: SCRIPT_DIR=$SCRIPT_DIR" >&2
-ECOSYSTEM_FILE="$SERVER_DIR/ecosystem.config.cjs"
+ECOSYSTEM_FILE="${CLAUDE_PLUGIN_ROOT}/server/ecosystem.config.cjs"
+PLUGIN_JSON="${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json"
 ENDPOINT="http://localhost:41765/health"
-
-# Version tracking
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/lingo"
-VERSION_FILE="$CONFIG_DIR/.running-version"
-SERVER_PACKAGE_JSON="$SERVER_DIR/package.json"
 
 # Check if pm2 is available, install if not
 if ! command -v pm2 &> /dev/null; then
-  # Try to install pm2 globally
   if command -v bun &> /dev/null; then
     bun install -g pm2 &> /dev/null
   elif command -v npm &> /dev/null; then
     npm install -g pm2 &> /dev/null
   fi
 
-  # Check again after install attempt
   if ! command -v pm2 &> /dev/null; then
     echo "⚠️ pm2 not installed. Run: npm install -g pm2" >&2
     exit 3
@@ -30,50 +21,32 @@ if ! command -v pm2 &> /dev/null; then
   echo "📦 pm2 installed automatically." >&2
 fi
 
-# Get current server version from package.json
-get_server_version() {
-  if [[ -f "$SERVER_PACKAGE_JSON" ]] && command -v jq &> /dev/null; then
-    jq -r '.version // "unknown"' "$SERVER_PACKAGE_JSON" 2>/dev/null || echo "unknown"
-  else
-    echo "unknown"
+# Get plugin version from plugin.json
+PLUGIN_VERSION="unknown"
+if [[ -f "$PLUGIN_JSON" ]] && command -v jq &> /dev/null; then
+  PLUGIN_VERSION=$(jq -r '.version // "unknown"' "$PLUGIN_JSON" 2>/dev/null) || PLUGIN_VERSION="unknown"
+fi
+
+# Check if server is healthy and get its version
+HEALTH_RESPONSE=$(curl -s --max-time 2 "$ENDPOINT" 2>/dev/null) || HEALTH_RESPONSE=""
+
+if [[ -n "$HEALTH_RESPONSE" ]]; then
+  SERVER_VERSION=""
+  if command -v jq &> /dev/null; then
+    SERVER_VERSION=$(echo "$HEALTH_RESPONSE" | jq -r '.version // ""' 2>/dev/null) || SERVER_VERSION=""
   fi
-}
 
-# Get stored running version
-get_running_version() {
-  if [[ -f "$VERSION_FILE" ]]; then
-    cat "$VERSION_FILE" 2>/dev/null || echo ""
-  else
-    echo ""
-  fi
-}
-
-# Save running version
-save_running_version() {
-  mkdir -p "$CONFIG_DIR"
-  echo "$1" > "$VERSION_FILE"
-}
-
-SERVER_VERSION=$(get_server_version)
-RUNNING_VERSION=$(get_running_version)
-
-# Check if server is already healthy (most reliable check)
-if curl -s --max-time 2 "$ENDPOINT" > /dev/null 2>&1; then
-  # Server is running - check if version changed
-  if [[ "$SERVER_VERSION" != "unknown" && "$RUNNING_VERSION" != "" && "$SERVER_VERSION" != "$RUNNING_VERSION" ]]; then
-    # Version changed, restart
+  if [[ "$PLUGIN_VERSION" != "unknown" && -n "$SERVER_VERSION" && "$SERVER_VERSION" != "$PLUGIN_VERSION" ]]; then
+    # Version mismatch, restart to upgrade
     pm2 restart "$PROCESS_NAME" 2>/dev/null || true
     sleep 0.3
-    if curl -s --max-time 2 "$ENDPOINT" > /dev/null 2>&1; then
-      save_running_version "$SERVER_VERSION"
-      echo "🔄 Lingo updated to v$SERVER_VERSION" >&2
+    NEW_HEALTH=$(curl -s --max-time 2 "$ENDPOINT" 2>/dev/null) || NEW_HEALTH=""
+    if [[ -n "$NEW_HEALTH" ]]; then
+      NEW_VERSION=$(echo "$NEW_HEALTH" | jq -r '.version // ""' 2>/dev/null) || NEW_VERSION=""
+      echo "🔄 Lingo updated to v$NEW_VERSION" >&2
       exit 3
     fi
   else
-    # No version change, just report status
-    if [[ "$RUNNING_VERSION" == "" ]]; then
-      save_running_version "$SERVER_VERSION"
-    fi
     echo "🌐 Lingo v$SERVER_VERSION" >&2
     exit 3
   fi
@@ -94,8 +67,7 @@ fi
 for i in {1..10}; do
   sleep 0.5
   if curl -s --max-time 2 "$ENDPOINT" > /dev/null 2>&1; then
-    save_running_version "$SERVER_VERSION"
-    echo "▶️ Lingo v$SERVER_VERSION started." >&2
+    echo "▶️ Lingo v$PLUGIN_VERSION started." >&2
     exit 3
   fi
 done
