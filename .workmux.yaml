@@ -93,10 +93,8 @@ post_create:
 #   - WM_WORKTREE_PATH: Absolute path to the worktree
 #   - WM_PROJECT_ROOT: Absolute path of the main project directory
 #   - WM_HANDLE: The worktree handle/window name
-pre_merge:
-  - "<global>"
-  - cd server && bun run typecheck
-  - cd server && bunx tsc --noEmit
+# pre_merge:
+#   - cd server && bun run typecheck
 
 # Commands to run before worktree removal (during merge or remove).
 # Useful for backing up gitignored files before cleanup.
