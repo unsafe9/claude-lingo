@@ -52,6 +52,12 @@ if [[ -n "$HEALTH_RESPONSE" ]]; then
   fi
 fi
 
+# Ensure web dashboard build exists before starting server
+WEB_BUILD_SCRIPT="${CLAUDE_PLUGIN_ROOT}/scripts/ensure-web-build.sh"
+if [[ -f "$WEB_BUILD_SCRIPT" ]]; then
+  bash "$WEB_BUILD_SCRIPT" 2>/dev/null || true
+fi
+
 # Server not healthy - try to start it
 if pm2 list 2>/dev/null | grep -q "$PROCESS_NAME"; then
   # Process registered, try to start/restart

@@ -12,6 +12,7 @@
     "@hono/zod-validator": "^0.5.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "hono": "^4.7.10",
+    "ts-fsrs": "^5.2.3",
     "zod": "^4.3.4"
   },
   "devDependencies": {

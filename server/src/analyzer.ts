@@ -1,5 +1,5 @@
 import { getConfig } from "./config.js";
-import { insertPrompt } from "./database.js";
+import { insertPrompt, createReviewItem } from "./database.js";
 import { queryClaudeAI, withRetry } from "./claude.js";
 
 import type { Tone, Mode } from "./validation.js";
@@ -330,7 +330,7 @@ async function processQueue(): Promise<void> {
           const alternative = result.type === "alternative" ? result.text : null;
           const categories = result.explanations.map(e => e.category);
 
-          insertPrompt({
+          const promptId = insertPrompt({
             prompt: record.prompt,
             timestamp: record.timestamp,
             session_id: record.session_id,
@@ -341,6 +341,11 @@ async function processQueue(): Promise<void> {
             alternative,
             categories,
           });
+
+          // Create review item for spaced repetition if there's something to learn
+          if (hasCorrection || alternative) {
+            createReviewItem(promptId);
+          }
         }
       } catch (error) {
         console.error("Failed to analyze prompt:", error);

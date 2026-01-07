@@ -3,6 +3,7 @@ import "./logger.js";
 import { setLogLevel } from "./logger.js";
 
 import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
 import { zValidator } from "@hono/zod-validator";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { mcpServer } from "./mcp.js";
@@ -16,7 +17,31 @@ import {
   onConfigChange,
   SERVER_PORT,
 } from "./config.js";
-import { insertPrompt, closeDb } from "./database.js";
+import {
+  insertPrompt,
+  closeDb,
+  getReviewItemsDue,
+  getReviewItemById,
+  updateReviewItem,
+  countReviewItemsDue,
+  createReviewItem,
+  getStreakData,
+  updateStreakAfterReview,
+  recordDailyActivity,
+  getHeatmapData,
+  getAllCategoriesWithCounts,
+  getStatsSummary,
+  type ReviewItemWithPrompt,
+} from "./database.js";
+import {
+  rateCard,
+  numberToGrade,
+  stateToString,
+  stringToState,
+  createNewCard,
+  State,
+  type FSRSCardState,
+} from "./fsrs.js";
 import { analyzePrompt, startBackgroundProcessor, stopBackgroundProcessor, waitForQueueDrain, queuePromptForAnalysis, getPendingQueueCount } from "./analyzer.js";
 import { PromptRequestSchema, ConfigUpdateSchema, formatZodErrors } from "./validation.js";
 import {
@@ -128,6 +153,125 @@ app.put(
   }
 );
 
+// ============================================
+// Review API Routes (for web dashboard)
+// ============================================
+
+// Get items due for review
+app.get("/api/review/due", (c) => {
+  const limit = parseInt(c.req.query("limit") || "20", 10);
+  const category = c.req.query("category") || undefined;
+
+  const items = getReviewItemsDue(limit, category);
+  const totalDue = countReviewItemsDue();
+
+  return c.json({ items, totalDue });
+});
+
+// Get review statistics
+app.get("/api/review/stats", (c) => {
+  const range = (c.req.query("range") || "week") as "day" | "week" | "month" | "all";
+  const stats = getStatsSummary(range);
+  const streaks = getStreakData();
+  const dueCount = countReviewItemsDue();
+
+  return c.json({
+    ...stats,
+    itemsDueForReview: dueCount,
+    currentStreak: streaks.current_streak,
+    bestStreak: streaks.best_streak,
+  });
+});
+
+// Rate a review item (submit answer)
+app.post("/api/review/:id/rate", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) {
+    return c.json({ success: false, error: "Invalid item ID" }, 400);
+  }
+
+  let body: { rating: number };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const rating = body.rating;
+  if (![1, 2, 3, 4].includes(rating)) {
+    return c.json({ success: false, error: "Rating must be 1-4" }, 400);
+  }
+
+  // Get the review item
+  const item = getReviewItemById(id);
+  if (!item) {
+    return c.json({ success: false, error: "Item not found" }, 404);
+  }
+
+  // Convert DB state to FSRS card state
+  const cardState: FSRSCardState = {
+    state: stringToState(item.state),
+    difficulty: item.difficulty,
+    stability: item.stability,
+    reps: item.reps,
+    lapses: item.lapses,
+    scheduledDays: 0,
+    elapsedDays: 0,
+    learningSteps: 0,
+    lastReview: item.last_review ? new Date(item.last_review) : null,
+    due: item.due ? new Date(item.due) : new Date(),
+  };
+
+  // Rate the card using FSRS
+  const grade = numberToGrade(rating as 1 | 2 | 3 | 4);
+  const now = new Date();
+  const newState = rateCard(cardState, grade, now);
+
+  // Update the database
+  updateReviewItem(
+    id,
+    stateToString(newState.state),
+    newState.difficulty,
+    newState.stability,
+    newState.reps,
+    newState.lapses,
+    newState.scheduledDays,
+    newState.elapsedDays,
+    newState.due.toISOString(),
+    now.toISOString()
+  );
+
+  // Record daily activity and update streak
+  const isCorrect = rating >= 3; // Good or Easy = correct
+  recordDailyActivity(isCorrect);
+  const streak = updateStreakAfterReview();
+
+  return c.json({
+    success: true,
+    nextDue: newState.due.toISOString(),
+    currentStreak: streak.current_streak,
+  });
+});
+
+// Get streak data
+app.get("/api/streaks", (c) => {
+  const streaks = getStreakData();
+  return c.json(streaks);
+});
+
+// Get heatmap data
+app.get("/api/heatmap", (c) => {
+  const months = parseInt(c.req.query("months") || "6", 10);
+  const data = getHeatmapData(months);
+  return c.json(data);
+});
+
+// Get all categories with counts
+app.get("/api/categories", (c) => {
+  const categories = getAllCategoriesWithCounts();
+  return c.json(categories);
+});
+
 // Main prompt endpoint
 app.post(
   "/prompt",
@@ -205,7 +349,7 @@ app.post(
             const alternative = result.type === "alternative" ? result.text : null;
             const categories = result.explanations.map(e => e.category);
 
-            insertPrompt({
+            const promptId = insertPrompt({
               ...promptData,
               analysis_result: result.explanations.map(e => e.detail).join("; "),
               has_correction: hasCorrection,
@@ -213,6 +357,11 @@ app.post(
               alternative,
               categories,
             });
+
+            // Create review item for spaced repetition if there's something to learn
+            if (hasCorrection || alternative) {
+              createReviewItem(promptId);
+            }
           } catch (error) {
             console.error("Failed to insert prompt:", error);
           }
@@ -226,6 +375,16 @@ app.post(
     }
   }
 );
+
+// ============================================
+// Dashboard Static File Serving (Production)
+// ============================================
+
+// Serve static assets from web/build at root
+// This comes after all API routes, so API routes take precedence
+app.use("/*", serveStatic({
+  root: "../web/build",
+}));
 
 // MCP Streamable HTTP endpoint
 // Store transports by session ID for session management
@@ -329,6 +488,7 @@ console.info(`Mode: ${config.mode}`);
 console.info(`Language: ${config.language}`);
 console.info(`Log level: ${config.logLevel}`);
 console.info(`MCP endpoint: http://localhost:${SERVER_PORT}/mcp`);
+console.info(`Dashboard: http://localhost:${SERVER_PORT}/`);
 
 // Start background processor for queue mode
 startBackgroundProcessor();
