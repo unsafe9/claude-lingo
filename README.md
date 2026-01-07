@@ -82,14 +82,40 @@ The server starts automatically via pm2 when you open Claude Code.
 
 Config file: `~/.config/lingo/config.json`
 
-Update via MCP in Claude Code:
+The config file supports hot-reload—changes take effect immediately without restarting the server.
+
+### Updating Configuration
+
+**Via MCP in Claude Code:**
 ```
 Update lingo config: mode block, language Japanese
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `language` | `English` | Language you're learning |
-| `mode` | `non-block` | Feedback mode |
-| `model` | `haiku` | Claude model for analysis |
-| `tone` | `balanced` | Feedback tone (casual/balanced/professional) |
+**Via direct file edit:**
+```json
+{
+  "language": "English",
+  "mode": "non-block",
+  "model": "haiku",
+  "tone": "balanced",
+  "claudeExecutablePath": "",
+  "queueBatchSize": 5,
+  "queueIntervalMs": 30000,
+  "logLevel": "info",
+  "autoCopyCorrections": false
+}
+```
+
+### Options Reference
+
+| Option | Default | Values | Description |
+|--------|---------|--------|-------------|
+| `language` | `English` | Any language (2-20 chars) | Target language you're learning |
+| `mode` | `non-block` | `silent`, `non-block`, `block` | Feedback mode (see [Operating Modes](#operating-modes)) |
+| `model` | `haiku` | `haiku`, `sonnet`, `opus` | Claude model for analysis. Haiku is fast and cheap; Sonnet/Opus for higher quality |
+| `tone` | `balanced` | `casual`, `balanced`, `professional` | Feedback style. Casual is friendly, professional is formal |
+| `claudeExecutablePath` | `""` | Path string | Custom path to Claude CLI executable. Leave empty for auto-detection |
+| `queueBatchSize` | `5` | 1-50 | Number of prompts to process per batch in silent mode |
+| `queueIntervalMs` | `30000` | 1000-300000 | Interval between background queue processing (ms). Only used in silent mode |
+| `logLevel` | `info` | `debug`, `info`, `warn`, `error` | Server log verbosity |
+| `autoCopyCorrections` | `false` | `true`, `false` | Automatically copy corrected text to clipboard |
