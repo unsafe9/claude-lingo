@@ -21,13 +21,16 @@ export type ExplanationCategory =
   | "formality"     // too casual/formal
   | "clarity"       // ambiguous, unclear
   | "redundancy"    // unnecessary words
+  // Special
+  | "translation"   // non-target language translated
   // Catch-all
   | "other";
 
 const VALID_CATEGORIES: Set<string> = new Set([
   "article", "preposition", "tense", "agreement", "word_order",
   "vocabulary", "spelling", "idiom",
-  "formality", "clarity", "redundancy", "other"
+  "formality", "clarity", "redundancy",
+  "translation", "other"
 ]);
 
 export interface Explanation {
@@ -205,7 +208,7 @@ async function executeAnalysis(
           break;
         case "translation":
           text = raw.correction ?? null;
-          explanations = [{ category: "other", detail: `Translated from ${raw.sourceLang}` }];
+          explanations = [{ category: "translation", detail: `Translated from ${raw.sourceLang}` }];
           break;
         case "correction":
           text = raw.correction ?? null;
